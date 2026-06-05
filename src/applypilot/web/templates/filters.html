@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}Search Filters — ApplyPilot{% endblock %}
+
+{% block content %}
+<h1>Search Filters</h1>
+<p class="subtitle">Configuração de buscas (searches.yaml) — Queries, locais, sites, exclusões</p>
+
+<div class="flex gap-2 mb-1" style="align-items:center">
+  <button class="btn btn-primary" onclick="saveFilters()" style="font-size:1rem;padding:0.6rem 1.5rem;font-weight:700">💾 Salvar Filtros</button>
+  <span id="save-status" class="text-muted" style="font-size:0.85rem"></span>
+</div>
+
+<div class="card">
+  <h3>Queries de Busca</h3>
+  <p class="text-muted" style="font-size:0.8rem;margin-bottom:0.5rem">Uma query por linha. Tier 1 = principal.</p>
+  <textarea id="queries" rows="8" style="font-family:monospace;font-size:0.8rem">{% for q in filters.queries %}{% set q = q.query if q is mapping else q %}{{ q }}
+{% endfor %}</textarea>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <h3>Locais aceitos</h3>
+    <textarea id="location_accept" rows="8" style="font-family:monospace;font-size:0.8rem">{% for l in filters.location_accept %}{{ l }}
+{% endfor %}</textarea>
+  </div>
+  <div class="card">
+    <h3>Locais rejeitados</h3>
+    <textarea id="location_reject" rows="8" style="font-family:monospace;font-size:0.8rem">{% for l in filters.location_reject_non_remote %}{{ l }}
+{% endfor %}</textarea>
+  </div>
+</div>
+
+<div class="grid-3">
+  <div class="card">
+    <h3>Sites</h3>
+    {% for s in filters.sites %}
+    <label style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.3rem">
+      <input type="checkbox" class="site-check" value="{{ s }}" checked onchange="updateSites()">
+      <span>{{ s }}</span>
+    </label>
+    {% endfor %}
+    <div style="margin-top:0.5rem">
+      <input id="new-site" placeholder="Add site..." style="width:120px;display:inline">
+      <button class="btn btn-sm" onclick="addSite()">+</button>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Excluir cargos</h3>
+    <textarea id="exclude_titles" rows="6" style="font-family:monospace;font-size:0.8rem">{% for t in filters.exclude_titles %}{{ t }}
+{% endfor %}</textarea>
+  </div>
+  <div class="card">
+    <h3>Padrões</h3>
+    <div class="form-group">
+      <label>Resultados por site</label>
+      <input id="results_per_site" value="{{ filters.defaults.results_per_site }}" style="width:80px">
+    </div>
+    <div class="form-group">
+      <label>Janela de busca</label>
+      <select id="hours_old">
+        {% set h = filters.defaults.hours_old|default(168) %}
+        <option value="24" {% if h == 24 %}selected{% endif %}>24 horas</option>
+        <option value="168" {% if h == 168 %}selected{% endif %}>1 semana</option>
+        <option value="720" {% if h == 720 %}selected{% endif %}>1 mês</option>
+        <option value="2160" {% if h == 2160 %}selected{% endif %}>3 meses</option>
+        <option value="0" {% if h == 0 %}selected{% endif %}>Sem filtro</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>País (Indeed)</label>
+      <input id="country_indeed" value="{{ filters.defaults.country_indeed }}" style="width:120px">
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_head %}
+<script>
+function updateSites() {
+  // just UI tracking
+}
+
+function addSite() {
+  const input = document.getElementById('new-site');
+  const val = input.value.trim();
+  if (!val) return;
+  const container = document.querySelector('.site-check').parentElement.parentElement;
+  const label = document.createElement('label');
+  label.style.cssText = 'display:flex;align-items:center;gap:0.5rem;margin-bottom:0.3rem';
+  label.innerHTML = '<input type="checkbox" class="site-check" value="' + val + '" checked onchange="updateSites()"><span>' + val + '</span>';
+  container.insertBefore(label, container.lastElementChild);
+  input.value = '';
+}
+
+async function saveFilters() {
+  const status = document.getElementById('save-status');
+  status.textContent = 'Salvando...';
+
+  const sites = Array.from(document.querySelectorAll('.site-check:checked')).map(cb => cb.value);
+
+  const data = {
+    queries: document.getElementById('queries').value.split('\n').map(s => s.trim()).filter(Boolean),
+    location_accept: document.getElementById('location_accept').value.split('\n').map(s => s.trim()).filter(Boolean),
+    location_reject_non_remote: document.getElementById('location_reject').value.split('\n').map(s => s.trim()).filter(Boolean),
+    sites: sites,
+    exclude_titles: document.getElementById('exclude_titles').value.split('\n').map(s => s.trim()).filter(Boolean),
+    defaults: {
+      results_per_site: parseInt(document.getElementById('results_per_site').value) || 30,
+      hours_old: parseInt(document.getElementById('hours_old').value) || 168,
+      country_indeed: document.getElementById('country_indeed').value.trim() || 'brazil',
+    },
+  };
+
+  const res = await fetch('/api/filters', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data),
+  });
+  const result = await res.json();
+  status.textContent = result.status === 'saved' ? '✓ Salvo!' : 'Erro: ' + (result.error || 'unknown');
+  setTimeout(() => status.textContent = '', 3000);
+}
+
+function resetFilters() {
+  if (!confirm('Resetar para os filtros originais?')) return;
+  location.reload();
+}
+</script>
+{% endblock %}

@@ -68,53 +68,60 @@ def _build_tailor_prompt(profile: dict) -> str:
     education = profile.get("experience", {})
     education_level = education.get("education_level", "")
 
-    return f"""You are a senior technical recruiter rewriting a resume to get this person an interview.
+    return f"""Você é um recrutador sênior especializado em reescrever currículos para conseguir entrevistas.
 
-Take the base resume and job description. Return a tailored resume as a JSON object.
+Use o currículo base e a descrição da vaga. Retorne um currículo personalizado como JSON.
 
-## RECRUITER SCAN (6 seconds):
-1. Title -- matches what they're hiring?
-2. Summary -- 2 sentences proving you've done this work
-3. First 3 bullets of most recent role -- verbs and outcomes match?
-4. Skills -- must-haves visible immediately?
+## REGRA DE IDIOMA:
+IMPORTANTE: Escreva TODO o currículo em PORTUGUÊS BRASILEIRO.
+Resumo, bullets de experiência, projetos, habilidades e educação devem estar em português.
+Nomes de empresas, cargos em inglês e palavras-chave técnicas (Docker, Python, etc.) devem permanecer no idioma original.
 
-## SKILLS BOUNDARY (real skills only):
+## RECRUITER SCAN (6 segundos):
+1. Título -- combina com a vaga?
+2. Resumo -- 2 frases provando que você já fez este trabalho
+3. Primeiros 3 bullets do cargo mais recente -- verbos e resultados combinam?
+4. Habilidades -- o essencial está visível?
+
+## SKILLS BOUNDARY (habilidades reais apenas):
 {skills_block}
 
-You MAY add 2-3 closely related tools (Kubernetes if Docker, Terraform if AWS, Redis if PostgreSQL). No unrelated languages/frameworks.
+Você PODE adicionar 2-3 ferramentas relacionadas (Kubernetes se Docker, Terraform se AWS, Redis se PostgreSQL). Nada de linguagens/frameworks não relacionados.
 
-## TAILORING RULES:
+## REGRAS DE PERSONALIZAÇÃO:
 
-TITLE: Match the target role. Keep seniority (Senior/Lead/Staff). Drop company suffixes and team names.
+TÍTULO: Iguale ao cargo da vaga. Mantenha senioridade (Sênior/Lead/Staff). Remova sufixos de empresa.
 
-SUMMARY: Rewrite from scratch. Lead with the 1-2 skills that matter most for THIS role. Sound like someone who's done this job.
+RESUMO: Reescreva do zero. Comece com as 1-2 habilidades mais importantes para ESTA vaga. Pareça alguém que já fez este trabalho.
 
-SKILLS: Reorder each category so the job's must-haves appear first.
+HABILIDADES: Reordene cada categoria para que os must-haves da vaga apareçam primeiro.
 
-Reframe EVERY bullet for this role. Same real work, different angle. Every bullet must be reworded. Never copy verbatim.
+Reformule CADA bullet para esta vaga. Mesmo trabalho real, ângulo diferente. Cada bullet deve ser reescrito. Nunca copie verbatim.
 
-PROJECTS: Reorder by relevance. Drop irrelevant projects entirely.
+EXPERIÊNCIA: Inclua TODAS as empresas listadas em Preserved companies abaixo. Toda empresa deve aparecer no array de experiência.
 
-BULLETS: Strong verb + what you built + quantified impact. Vary verbs (Built, Designed, Implemented, Reduced, Automated, Deployed, Operated, Optimized). Most relevant first. Max 4 per section.
+PROJETOS: Inclua projetos se relevantes. Se nenhum for relevante, use array vazio []. O campo projects é OBRIGATÓRIO.
 
-## VOICE:
-- Write like a real engineer. Short, direct.
-- GOOD: "Automated financial reporting with Python + API integrations, cut processing time from 10 hours to 2"
-- BAD: "Leveraged cutting-edge AI technologies to drive transformative operational efficiencies"
-- BANNED WORDS (using ANY of these = validation failure — do not use them even once):
+BULLETS: Verbo forte + o que construiu + impacto quantificado. Varie verbos (Construí, Projetei, Implementei, Reduzi, Automatizei, Otimizei). Mais relevantes primeiro. Máx 4 por seção.
+
+## VOZ:
+- Escreva como um profissional de marketing. Curto, direto.
+- BOM: "Automatizei relatórios financeiros com Python + APIs, reduzindo o tempo de processamento de 10h para 2h"
+- RUIM: "Utilizei tecnologias de IA de ponta para impulsionar eficiências operacionais transformadoras"
+- PALAVRAS PROIBIDAS (qualquer uma destas = falha de validação — não use nenhuma):
   {banned_str}
-- No em dashes. Use commas, periods, or hyphens.
+- Sem travessões. Use vírgulas, pontos ou hífens.
 
-## HARD RULES:
-- Do NOT invent work, companies, degrees, or certifications
-- Do NOT change real numbers ({metrics_str})
-- Preserved companies: {companies_str} -- names stay as-is
-- Preserved school: {school}
-- Must fit 1 page.
+## REGRAS RÍGIDAS:
+- Não invente trabalhos, empresas, diplomas ou certificações
+- Não altere números reais ({metrics_str})
+- Empresas preservadas: {companies_str} -- nomes permanecem como estão
+- Escola preservada: {school} -- o campo educação DEVE conter esta escola
+- Deve caber em 1 página.
 
-## OUTPUT: Return ONLY valid JSON. No markdown fences. No commentary. No "here is" preamble.
+## OUTPUT: Retorne SOMENTE JSON válido. Sem markdown. Sem comentários. Sem "aqui está".
 
-{{"title":"Role Title","summary":"2-3 tailored sentences.","skills":{{"Languages":"...","Frameworks":"...","DevOps & Infra":"...","Databases":"...","Tools":"..."}},"experience":[{{"header":"Title at Company","subtitle":"Tech | Dates","bullets":["bullet 1","bullet 2","bullet 3","bullet 4"]}}],"projects":[{{"header":"Project Name - Description","subtitle":"Tech | Dates","bullets":["bullet 1","bullet 2"]}}],"education":"{school} | {education_level}"}}"""
+{{"title":"Título do Cargo","summary":"2-3 frases personalizadas.","skills":{{"Linguagens":"...","Frameworks":"...","DevOps & Infra":"...","Bancos de Dados":"...","Ferramentas":"..."}},"experience":[{{"header":"Cargo na Empresa","subtitle":"Tecnologias | Datas","bullets":["bullet 1","bullet 2","bullet 3","bullet 4"]}}],"projects":[{{"header":"Nome do Projeto - Descrição","subtitle":"Tecnologias | Datas","bullets":["bullet 1","bullet 2"]}}],"education":"{school} | {education_level}"}}"""
 
 
 def _build_judge_prompt(profile: dict) -> str:
@@ -259,19 +266,19 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
     lines.append("")
 
     # Summary
-    lines.append("SUMMARY")
+    lines.append("RESUMO")
     lines.append(sanitize_text(data["summary"]))
     lines.append("")
 
     # Technical Skills
-    lines.append("TECHNICAL SKILLS")
+    lines.append("HABILIDADES TÉCNICAS")
     if isinstance(data["skills"], dict):
         for cat, val in data["skills"].items():
             lines.append(f"{cat}: {sanitize_text(str(val))}")
     lines.append("")
 
     # Experience
-    lines.append("EXPERIENCE")
+    lines.append("EXPERIÊNCIA")
     for entry in data.get("experience", []):
         lines.append(sanitize_text(entry.get("header", "")))
         if entry.get("subtitle"):
@@ -281,7 +288,7 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
         lines.append("")
 
     # Projects
-    lines.append("PROJECTS")
+    lines.append("PROJETOS")
     for entry in data.get("projects", []):
         lines.append(sanitize_text(entry.get("header", "")))
         if entry.get("subtitle"):
@@ -291,7 +298,7 @@ def assemble_resume_text(data: dict, profile: dict) -> str:
         lines.append("")
 
     # Education
-    lines.append("EDUCATION")
+    lines.append("FORMAÇÃO")
     lines.append(sanitize_text(str(data.get("education", ""))))
 
     return "\n".join(lines)

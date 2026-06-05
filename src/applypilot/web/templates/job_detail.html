@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Job Detail — ApplyPilot{% endblock %}
+
+{% block content %}
+{% if error %}
+<div class="card" style="text-align:center;padding:3rem">
+  <p class="text-red">{{ error }}</p>
+  <a href="{{ url_for('dashboard.jobs') }}" class="btn btn-primary mt-2">Back to Jobs</a>
+</div>
+{% elif job %}
+<div class="flex-between mb-1">
+  <h1>{{ job.get('title') or 'Untitled' }}</h1>
+  <a href="{{ url_for('dashboard.jobs') }}" class="btn btn-primary">Back to Jobs</a>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <h3>Job Details</h3>
+    <table>
+      <tr><td style="width:120px;color:#94a3b8">Site</td><td>{{ job.get('site') or '?' }}</td></tr>
+      <tr><td style="color:#94a3b8">Location</td><td>{{ job.get('location') or '-' }}</td></tr>
+      <tr><td style="color:#94a3b8">Salary</td><td>{{ job.get('salary') or '-' }}</td></tr>
+      <tr><td style="color:#94a3b8">Strategy</td><td>{{ job.get('strategy') or '-' }}</td></tr>
+      <tr><td style="color:#94a3b8">Discovered</td><td>{{ job.get('discovered_at') or '-' }}</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>AI Score</h3>
+    {% if job.get('fit_score') %}
+      <div style="text-align:center;padding:1rem">
+        <div style="font-size:3rem;font-weight:700;{% if job['fit_score'] >= 7 %}color:#10b981{% elif job['fit_score'] >= 5 %}color:#f59e0b{% else %}color:#ef4444{% endif %}">{{ job['fit_score'] }}/10</div>
+      </div>
+    {% else %}
+      <p class="text-muted">Not scored yet.</p>
+    {% endif %}
+  </div>
+</div>
+
+{% if job.get('score_reasoning') %}
+<div class="card">
+  <h3>Score Reasoning</h3>
+  <pre style="white-space:pre-wrap;font-size:0.85rem;line-height:1.5;color:#94a3b8;max-height:200px;overflow-y:auto">{{ job['score_reasoning'] }}</pre>
+</div>
+{% endif %}
+
+<div class="card">
+  <h3>Full Description</h3>
+  {% if job.get('full_description') %}
+    <pre style="white-space:pre-wrap;font-size:0.85rem;line-height:1.6;color:#cbd5e1;max-height:500px;overflow-y:auto;background:#0f172a;padding:1rem;border-radius:8px">{{ job['full_description'] }}</pre>
+  {% else %}
+    <p class="text-muted">No description available.</p>
+  {% endif %}
+</div>
+
+<div class="grid-2">
+  {% if tailored %}
+  <div class="card">
+    <h3>Tailored Resume</h3>
+    <pre style="white-space:pre-wrap;font-size:0.8rem;line-height:1.5;color:#cbd5e1;max-height:400px;overflow-y:auto;background:#0f172a;padding:1rem;border-radius:8px">{{ tailored }}</pre>
+  </div>
+  {% endif %}
+
+  {% if cover %}
+  <div class="card">
+    <h3>Cover Letter</h3>
+    <pre style="white-space:pre-wrap;font-size:0.8rem;line-height:1.5;color:#cbd5e1;max-height:400px;overflow-y:auto;background:#0f172a;padding:1rem;border-radius:8px">{{ cover }}</pre>
+  </div>
+  {% endif %}
+</div>
+
+{% if job.get('application_url') or job.get('url') %}
+<div class="card" style="text-align:center">
+  <div class="flex gap-2" style="justify-content:center;flex-wrap:wrap">
+    <button class="btn btn-primary" onclick="applyNow()" id="btn-apply"
+            style="padding:0.6rem 1.5rem;font-weight:700;background:#10b981;color:#fff">
+      ▶ Aplicar Agora
+    </button>
+    <a href="{{ job.get('application_url') or job['url'] }}" class="btn btn-primary" target="_blank" style="padding:0.6rem 1.5rem">
+      Open Application URL
+    </a>
+    <a href="{{ job['url'] }}" class="btn btn-primary" target="_blank" style="padding:0.6rem 1.5rem;margin-left:0.5rem">
+      View Original Job
+    </a>
+  </div>
+  <div id="apply-status" class="text-muted" style="margin-top:0.5rem;font-size:0.85rem"></div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_head %}
+<script>
+async function applyNow() {
+  const btn = document.getElementById('btn-apply');
+  const status = document.getElementById('apply-status');
+  btn.disabled = true;
+  btn.textContent = '⏳ Aplicando...';
+  status.textContent = 'Iniciando candidatura...';
+
+  const res = await fetch('/api/jobs/apply', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({url: '{{ job["url"] }}', dry_run: false}),
+  });
+  const data = await res.json();
+  btn.disabled = false;
+  if (data.status === 'applied') {
+    btn.textContent = '✓ Aplicado';
+    status.textContent = 'Candidatura enviada com sucesso!';
+  } else {
+    btn.textContent = '▶ Tentar Novamente';
+    status.textContent = 'Falha: ' + (data.error || data.status || 'unknown');
+  }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Apply Queue — ApplyPilot{% endblock %}
+
+{% block content %}
+<h1>Apply Queue</h1>
+<p class="subtitle">
+  <span class="tag tag-yellow">{{ counts.queued }} queued</span>
+  <span class="tag tag-blue">{{ counts.processing }} processing</span>
+  <span class="tag tag-green">{{ counts.completed }} completed</span>
+  <span class="tag tag-red">{{ counts.failed }} failed</span>
+</p>
+
+<div class="flex gap-2 mb-1" style="flex-wrap:wrap">
+  <form id="enqueue-batch-form" class="flex gap-1" style="align-items:end">
+    <div class="form-group" style="margin:0">
+      <label>Min Score</label>
+      <input name="min_score" value="7" style="width:80px">
+    </div>
+    <div class="form-group" style="margin:0">
+      <label>Limit</label>
+      <input name="limit" value="50" style="width:80px">
+    </div>
+    <button type="submit" class="btn btn-primary">Enqueue Batch</button>
+  </form>
+  <form id="process-form" class="flex gap-1" style="align-items:end">
+    <div class="form-group" style="margin:0">
+      <label>Max Jobs</label>
+      <input name="max_jobs" value="5" style="width:80px">
+    </div>
+    <button type="submit" class="btn btn-primary">Process Queue</button>
+  </form>
+  <button class="btn" style="background:#ef4444;color:#fff;align-self:end" onclick="clearQueue()">Clear Queue</button>
+</div>
+
+<div class="card">
+  <table>
+    <tr>
+      <th>Job Title</th>
+      <th>Site</th>
+      <th>Status</th>
+      <th>Error</th>
+      <th>Created</th>
+      <th></th>
+    </tr>
+    {% for e in queue %}
+    <tr>
+      <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ e.job_title }}</td>
+      <td><span class="tag">{{ e.site or "—" }}</span></td>
+      <td>
+        {% if e.status == 'queued' %}
+          <span class="tag tag-yellow">queued</span>
+        {% elif e.status == 'processing' %}
+          <span class="tag tag-blue">processing</span>
+        {% elif e.status == 'completed' %}
+          <span class="tag tag-green">completed</span>
+        {% elif e.status == 'failed' %}
+          <span class="tag tag-red">failed</span>
+        {% else %}
+          <span class="tag">{{ e.status }}</span>
+        {% endif %}
+      </td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#ef4444;font-size:0.8rem">{{ e.error or "—" }}</td>
+      <td style="white-space:nowrap">{{ e.created_at[:10] }}</td>
+      <td>
+        {% if e.status == 'queued' %}
+        <button class="btn btn-sm" style="background:#ef4444;color:#fff" onclick="cancelEntry({{ e.id }})">Cancel</button>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    {% if not queue %}
+    <tr><td colspan="6" class="text-muted" style="text-align:center;padding:2rem">Queue is empty.</td></tr>
+    {% endif %}
+  </table>
+</div>
+{% endblock %}
+
+{% block extra_head %}
+<script>
+document.getElementById('enqueue-batch-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const res = await fetch('/api/apply-queue/enqueue-batch', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(Object.fromEntries(fd)),
+  });
+  if (res.ok) location.reload();
+});
+
+document.getElementById('process-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const res = await fetch('/api/apply-queue/process', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(Object.fromEntries(fd)),
+  });
+  if (res.ok) location.reload();
+});
+
+async function cancelEntry(id) {
+  await fetch('/api/apply-queue/' + id + '/cancel', {method: 'POST'});
+  location.reload();
+}
+
+async function clearQueue() {
+  if (!confirm('Clear all queue entries?')) return;
+  await fetch('/api/apply-queue/clear', {method: 'POST'});
+  location.reload();
+}
+</script>
+{% endblock %}

@@ -1,8 +1,8 @@
-"""Apply orchestration: acquire jobs, spawn Claude Code sessions, track results.
+"""Apply orchestration: acquire jobs, spawn agent sessions, track results.
 
-This is the main entry point for the apply pipeline. It pulls jobs from
-the database, launches Chrome + Claude Code for each one, parses the
-result, and updates the database. Supports parallel workers via --workers.
+Supports both Claude Code CLI and DeepSeek-powered browser agent.
+Pulls jobs from the database, launches Chrome + agent for each one,
+parses the result, and updates the database.
 """
 
 import atexit
@@ -111,7 +111,7 @@ def acquire_job(target_url: str | None = None, min_score: int = 7,
                 FROM jobs
                 WHERE (url = ? OR application_url = ? OR application_url LIKE ? OR url LIKE ?)
                   AND tailored_resume_path IS NOT NULL
-                  AND apply_status != 'in_progress'
+                  AND (apply_status IS NULL OR apply_status != 'in_progress')
                 LIMIT 1
             """, (target_url, target_url, like, like)).fetchone()
         else:
@@ -516,6 +516,91 @@ def run_job(job: dict, port: int, worker_id: int = 0,
 
 
 # ---------------------------------------------------------------------------
+# DeepSeek agent runner
+# ---------------------------------------------------------------------------
+
+def run_job_deepseek(job: dict, port: int, worker_id: int = 0,
+                     model: str = "deepseek-chat", dry_run: bool = False) -> tuple[str, int]:
+    """Run a job application using DeepSeek + Playwright MCP.
+
+    Returns:
+        Tuple of (status_string, duration_ms).
+    """
+    from applypilot.apply.deepseek_agent import MCPClient, DeepSeekApplyAgent
+
+    # Read tailored resume text
+    resume_path = job.get("tailored_resume_path")
+    txt_path = Path(resume_path).with_suffix(".txt") if resume_path else None
+    resume_text = ""
+    if txt_path and txt_path.exists():
+        resume_text = txt_path.read_text(encoding="utf-8")
+
+    # Build the prompt
+    agent_prompt = prompt_mod.build_prompt(
+        job=job,
+        tailored_resume=resume_text,
+        dry_run=dry_run,
+    )
+
+    worker_dir = reset_worker_dir(worker_id)
+
+    update_state(worker_id, status="applying", job_title=job["title"],
+                 company=job.get("site", ""), score=job.get("fit_score", 0),
+                 start_time=time.time(), actions=0, last_action="starting")
+    add_event(f"[W{worker_id}] Starting (DeepSeek): {job['title'][:40]} @ {job.get('site', '')}")
+
+    start = time.time()
+
+    mcp = MCPClient(port=port, viewport=config.DEFAULTS["viewport"])
+    try:
+        mcp.start()
+        agent = DeepSeekApplyAgent(model=model)
+        status, duration_ms = agent.run(agent_prompt, mcp=mcp, dry_run=dry_run)
+        elapsed = int(time.time() - start)
+
+        # Login help: pause and ask user to log in manually, then retry
+        if status in ("login_issue", "failed:login_issue", "need_login_help"):
+            msg = (
+                f"\n{'=' * 60}\n"
+                f"  LOGIN REQUIRED para: {job['title']} @ {job.get('site', '')}\n"
+                f"  URL: {job.get('application_url') or job['url']}\n"
+                f"  Chrome está aberto e aguardando você fazer login manualmente.\n"
+                f"  Após fazer login (e-mail/SMS/CAPTCHA), pressione ENTER para continuar...\n"
+                f"{'=' * 60}\n"
+            )
+            try:
+                input(msg)
+            except (EOFError, OSError):
+                logger.warning("No interactive terminal. Marking as NEED_LOGIN_HELP and skipping retry.")
+                add_event(f"[W{worker_id}] NEED_LOGIN_HELP (no terminal): {job['title'][:30]}")
+                update_state(worker_id, status="login_issue",
+                             last_action="NEED_LOGIN_HELP (run manually)")
+                return "need_login_help", duration_ms
+            # Retry with the same Chrome session
+            add_event(f"[W{worker_id}] Retrying after manual login...")
+            agent2 = DeepSeekApplyAgent(model=model)
+            # Send a follow-up prompt telling the agent the user logged in
+            agent2.messages = agent.messages + [
+                {"role": "user", "content": "The user has completed the login manually. Continue with the application. If you are already on the job page, proceed to fill and submit the application. If not on the job page, navigate to the job URL and proceed."},
+            ]
+            agent2.turn_count = 0
+            status, duration_ms2 = agent2.run_continue(mcp=mcp, dry_run=dry_run)
+            duration_ms += duration_ms2
+            elapsed = int(time.time() - start)
+
+        add_event(f"[W{worker_id}] {status.upper()} ({elapsed}s): {job['title'][:30]}")
+        update_state(worker_id, status=status, last_action=f"{status} ({elapsed}s)")
+        return status, duration_ms
+    except Exception as e:
+        duration_ms = int((time.time() - start) * 1000)
+        logger.exception("DeepSeek agent error for job %s", job.get("title", "unknown"))
+        add_event(f"[W{worker_id}] ERROR: {str(e)[:40]}")
+        return f"failed:{str(e)[:100]}", duration_ms
+    finally:
+        mcp.stop()
+
+
+# ---------------------------------------------------------------------------
 # Permanent failure classification
 # ---------------------------------------------------------------------------
 
@@ -548,7 +633,8 @@ def _is_permanent_failure(result: str) -> bool:
 def worker_loop(worker_id: int = 0, limit: int = 1,
                 target_url: str | None = None,
                 min_score: int = 7, headless: bool = False,
-                model: str = "sonnet", dry_run: bool = False) -> tuple[int, int]:
+                model: str = "sonnet", dry_run: bool = False,
+                provider: str = "claude") -> tuple[int, int]:
     """Run jobs sequentially until limit is reached or queue is empty.
 
     Args:
@@ -599,10 +685,25 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
         chrome_proc = None
         try:
             add_event(f"[W{worker_id}] Launching Chrome...")
-            chrome_proc = launch_chrome(worker_id, port=port, headless=headless)
 
-            result, duration_ms = run_job(job, port=port, worker_id=worker_id,
-                                            model=model, dry_run=dry_run)
+            if provider == "patchright":
+                from applypilot.apply.engine import apply_to_job
+                from applypilot.config import load_profile
+                profile = load_profile()
+                engine_result = apply_to_job(job, profile, dry_run=dry_run)
+                result = engine_result.get("status", "failed")
+                error = engine_result.get("error")
+                duration_ms = engine_result.get("duration_ms", 0)
+                if error:
+                    result = f"failed:{error}"
+            elif provider == "deepseek":
+                chrome_proc = launch_chrome(worker_id, port=port, headless=headless)
+                result, duration_ms = run_job_deepseek(job, port=port, worker_id=worker_id,
+                                                       model=model, dry_run=dry_run)
+            else:
+                chrome_proc = launch_chrome(worker_id, port=port, headless=headless)
+                result, duration_ms = run_job(job, port=port, worker_id=worker_id,
+                                                model=model, dry_run=dry_run)
 
             if result == "skipped":
                 release_lock(job["url"])
@@ -653,7 +754,8 @@ def worker_loop(worker_id: int = 0, limit: int = 1,
 def main(limit: int = 1, target_url: str | None = None,
          min_score: int = 7, headless: bool = False, model: str = "sonnet",
          dry_run: bool = False, continuous: bool = False,
-         poll_interval: int = 60, workers: int = 1) -> None:
+         poll_interval: int = 60, workers: int = 1,
+         provider: str = "claude") -> None:
     """Launch the apply pipeline.
 
     Args:
@@ -737,6 +839,7 @@ def main(limit: int = 1, target_url: str | None = None,
                     headless=headless,
                     model=model,
                     dry_run=dry_run,
+                    provider=provider,
                 )
             else:
                 # Multi-worker — distribute limit across workers
@@ -760,6 +863,7 @@ def main(limit: int = 1, target_url: str | None = None,
                             headless=headless,
                             model=model,
                             dry_run=dry_run,
+                            provider=provider,
                         ): i
                         for i in range(workers)
                     }

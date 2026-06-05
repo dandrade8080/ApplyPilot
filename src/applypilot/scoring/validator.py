@@ -68,7 +68,7 @@ FABRICATION_WATCHLIST: set[str] = {
     "certif", "certified", "pmp", "scrum master", "aws certified",
 }
 
-REQUIRED_SECTIONS: set[str] = {"SUMMARY", "TECHNICAL SKILLS", "EXPERIENCE", "PROJECTS", "EDUCATION"}
+REQUIRED_SECTIONS: set[str] = {"RESUMO", "HABILIDADES TÉCNICAS", "EXPERIÊNCIA", "PROJETOS", "FORMAÇÃO"}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -114,9 +114,13 @@ def validate_json_fields(data: dict, profile: dict, mode: str = "normal") -> dic
     warnings: list[str] = []
 
     # Required keys — always checked regardless of mode
-    for key in ("title", "summary", "skills", "experience", "projects", "education"):
+    for key in ("title", "summary", "skills", "experience", "education"):
         if key not in data or not data[key]:
             errors.append(f"Missing required field: {key}")
+    # Projects is optional (DeepSeek sometimes omits it). Warn but don't fail.
+    if "projects" not in data or not data["projects"]:
+        warnings.append("Missing or empty projects field")
+        data["projects"] = data.get("projects") or []
     if errors:
         return {"passed": False, "errors": errors, "warnings": warnings}
 
@@ -337,9 +341,9 @@ def validate_cover_letter(text: str, mode: str = "normal") -> dict:
     if found_leaks:
         errors.append(f"LLM self-talk: '{found_leaks[0]}'")
 
-    # 5. Must start with "Dear" — always checked (preamble should have been stripped)
+    # 5. Must start with "Prezado" — always checked (preamble should have been stripped)
     stripped = text.strip()
-    if not stripped.lower().startswith("dear"):
-        errors.append("Must start with 'Dear Hiring Manager,'")
+    if not stripped.lower().startswith("prezado"):
+        errors.append("Deve começar com 'Prezado(a) Gerente de Contratação,'")
 
     return {"passed": len(errors) == 0, "errors": errors, "warnings": warnings}

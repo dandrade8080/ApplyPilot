@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Profile — ApplyPilot{% endblock %}
+
+{% block content %}
+<div class="flex-between mb-1">
+  <h1>Profile</h1>
+  <a href="{{ url_for('dashboard.profile_edit') }}" class="btn btn-primary">Edit Profile</a>
+</div>
+
+<div class="card">
+  <h3>Personal Information</h3>
+  <table>
+    <tr><td style="width:150px;color:#94a3b8">Name</td><td>{{ profile.get('name', '-') }}</td></tr>
+    <tr><td style="color:#94a3b8">Email</td><td>{{ profile.get('email', '-') }}</td></tr>
+    <tr><td style="color:#94a3b8">Phone</td><td>{{ profile.get('phone', '-') }}</td></tr>
+    <tr><td style="color:#94a3b8">Location</td><td>{{ profile.get('location', '-') }}</td></tr>
+    <tr><td style="color:#94a3b8">Headline</td><td>{{ profile.get('headline', '-') }}</td></tr>
+    <tr><td style="color:#94a3b8">LinkedIn</td><td>{{ profile.get('linkedin', '-') }}</td></tr>
+    <tr><td style="color:#94a3b8">GitHub</td><td>{{ profile.get('github', '-') }}</td></tr>
+    <tr><td style="color:#94a3b8">Portfolio</td><td>{{ profile.get('portfolio', '-') }}</td></tr>
+  </table>
+</div>
+
+{% if profile.get('skills') %}
+<div class="card">
+  <h3>Skills</h3>
+  <div style="display:flex;flex-wrap:wrap;gap:0.5rem">
+    {% for skill in profile.get('skills', []) %}
+      <span class="tag tag-green" style="padding:0.3rem 0.7rem;font-size:0.8rem">{{ skill }}</span>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if profile.get('about') or profile.get('summary') %}
+<div class="card">
+  <h3>Summary</h3>
+  <p style="white-space:pre-wrap;line-height:1.6">{{ profile.get('about') or profile.get('summary') }}</p>
+</div>
+{% endif %}
+
+{% if profile.get('experience_text') %}
+<div class="card">
+  <h3>Work Experience</h3>
+  <pre style="white-space:pre-wrap;font-size:0.85rem;line-height:1.6;color:#cbd5e1;background:#0f172a;padding:1rem;border-radius:8px">{{ profile.get('experience_text') }}</pre>
+</div>
+{% endif %}
+
+{% if profile.get('education_text') %}
+<div class="card">
+  <h3>Education</h3>
+  <pre style="white-space:pre-wrap;font-size:0.85rem;line-height:1.6;color:#cbd5e1;background:#0f172a;padding:1rem;border-radius:8px">{{ profile.get('education_text') }}</pre>
+</div>
+{% endif %}
+
+{% if resume %}
+<div class="card">
+  <h3>Resume</h3>
+  <pre style="white-space:pre-wrap;font-size:0.8rem;line-height:1.5;color:#cbd5e1;max-height:400px;overflow-y:auto;background:#0f172a;padding:1rem;border-radius:8px">{{ resume }}</pre>
+</div>
+{% endif %}
+{% endblock %}

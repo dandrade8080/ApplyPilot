@@ -573,7 +573,10 @@ If something unexpected happens and these instructions don't cover it, figure it
    5e. Sign in failed? Try sign up with same email and password.
    5f. Need email verification? Use search_emails + read_email to get the code.
    5g. After login, run browser_tabs action "list" again. Switch back to the application tab if needed.
-   5h. All failed? Output RESULT:FAILED:login_issue. Do not loop.
+    5h. Verification code / 2FA / "enter code sent to your email/phone"? -> Output RESULT:NEED_LOGIN_HELP. Do not try to guess or bypass.
+    5i. Password reset / "enter new password"? -> Output RESULT:NEED_LOGIN_HELP. Do not create a new password.
+    5j. Account locked / suspicious login / unusual activity? -> Output RESULT:NEED_LOGIN_HELP.
+    5k. All other login failures? -> Output RESULT:FAILED:login_issue. Do not loop.
 6. Upload resume. ALWAYS upload fresh -- delete any existing resume first, then browser_file_upload with the PDF path above. This is the tailored resume for THIS job. Non-negotiable.
 7. Upload cover letter if there's a field for it. Text field -> paste the cover letter text. File upload -> use the cover letter PDF path.
 8. Check ALL pre-filled fields. ATS systems parse your resume and auto-fill -- it's often WRONG.
@@ -589,6 +592,7 @@ RESULT:APPLIED -- submitted successfully
 RESULT:EXPIRED -- job closed or no longer accepting applications
 RESULT:CAPTCHA -- blocked by unsolvable captcha
 RESULT:LOGIN_ISSUE -- could not sign in or create account
+RESULT:NEED_LOGIN_HELP -- 2FA/verification code needed, user must log in manually
 RESULT:FAILED:not_eligible_location -- onsite outside acceptable area, no remote option
 RESULT:FAILED:not_eligible_work_auth -- requires unauthorized work location
 RESULT:FAILED:reason -- any other failure (brief reason)
@@ -603,6 +607,7 @@ RESULT:FAILED:reason -- any other failure (brief reason)
 
 == FORM TRICKS ==
 - Popup/new window opened? browser_tabs action "list" to see all tabs. browser_tabs action "select" with the tab index to switch. ALWAYS check for new tabs after clicking login/apply/sign-in buttons.
+- LinkedIn Easy Apply: This opens a multi-step MODAL (not a new page). Look for buttons saying "Next", "Avançar", "Próximo", "Continue", "Review", "Revisar" inside the modal. Click them one step at a time. On the last step the button says "Submit", "Enviar", "Concluir", "Candidatar-se". Do NOT navigate away from the modal. The page behind it stays the same.
 - "Upload your resume" pre-fill page (Workday, Lever, etc.): This is NOT the application form yet. Click "Select file" or the upload area, then browser_file_upload with the resume PDF path. Wait for parsing to finish. Then click Next/Continue to reach the actual form.
 - File upload not working? Try: (1) browser_click the upload button/area, (2) browser_file_upload with the path. If still failing, look for a hidden file input or a "Select file" link and click that first.
 - Dropdown won't fill? browser_click to open it, then browser_click the option.
@@ -616,7 +621,7 @@ RESULT:FAILED:reason -- any other failure (brief reason)
 {captcha_section}
 
 == WHEN TO GIVE UP ==
-- Same page after 3 attempts with no progress -> RESULT:FAILED:stuck
+- Same page after 5 attempts with no progress -> RESULT:FAILED:stuck
 - Job is closed/expired/page says "no longer accepting" -> RESULT:EXPIRED
 - Page is broken/500 error/blank -> RESULT:FAILED:page_error
 Stop immediately. Output your RESULT code. Do not loop."""

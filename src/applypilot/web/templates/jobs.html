@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Jobs — ApplyPilot{% endblock %}
+
+{% block extra_head %}
+<style>
+  .filters { background: #1e293b; border-radius: 12px; padding: 1rem; margin-bottom: 1.5rem; display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+  .filter-btn { background: #334155; border: none; color: #94a3b8; padding: 0.35rem 0.7rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
+  .filter-btn:hover { background: #475569; color: #e2e8f0; }
+  .filter-btn.active { background: #60a5fa; color: #0f172a; font-weight: 600; }
+
+  .job-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  .job-table th { text-align: left; padding: 0.6rem 0.75rem; color: #94a3b8; font-weight: 600; border-bottom: 1px solid #334155; }
+  .job-table td { padding: 0.6rem 0.75rem; border-bottom: 1px solid #1e293b; }
+
+  .score-cell { font-weight: 700; text-align: center; }
+  .score-high { color: #10b981; }
+  .score-mid { color: #f59e0b; }
+  .score-low { color: #ef4444; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Jobs</h1>
+<p class="subtitle">{{ jobs|length }} jobs in "{{ current_stage }}" stage</p>
+
+<div class="filters">
+  {% for key, label in stages %}
+    <a href="{{ url_for('dashboard.jobs', stage=key) }}" class="filter-btn {% if current_stage == key %}active{% endif %}">{{ label }}</a>
+  {% endfor %}
+</div>
+
+{% if jobs %}
+<div class="card" style="padding:0;overflow-x:auto">
+  <table class="job-table">
+    <thead>
+      <tr>
+        <th>Score</th>
+        <th>Title</th>
+        <th>Site</th>
+        <th>Location</th>
+        <th>Salary</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for job in jobs %}
+      {% set score = job.get('fit_score') or 0 %}
+      <tr>
+        <td class="score-cell">
+          {% if job.get('fit_score') %}
+            <span class="{% if score >= 7 %}score-high{% elif score >= 5 %}score-mid{% else %}score-low{% endif %}">{{ score }}</span>
+          {% else %}
+            <span class="text-muted">—</span>
+          {% endif %}
+        </td>
+        <td><a href="{{ url_for('dashboard.job_detail', job_url=job['url']) }}">{{ job.get('title') or 'Untitled' }}</a></td>
+        <td><span class="tag">{{ job.get('site') or '?' }}</span></td>
+        <td>{{ (job.get('location') or '')[:30] }}</td>
+        <td>{{ job.get('salary') or '' }}</td>
+        <td>
+          {% if job.get('applied_at') %}<span class="tag tag-green">Applied</span>
+          {% elif job.get('tailored_resume_path') %}<span class="tag tag-blue">Tailored</span>
+          {% elif job.get('fit_score') and job['fit_score'] >= 7 %}<span class="tag tag-yellow">Scored {{ job['fit_score'] }}</span>
+          {% elif job.get('fit_score') %}<span class="tag tag-red">Low ({{ job['fit_score'] }})</span>
+          {% elif job.get('full_description') %}<span class="tag">Enriched</span>
+          {% else %}<span class="tag">Discovered</span>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card" style="text-align:center;padding:3rem">
+  <p class="text-muted">No jobs found in this stage.</p>
+</div>
+{% endif %}
+{% endblock %}

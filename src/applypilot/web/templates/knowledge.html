@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Knowledge Base — ApplyPilot{% endblock %}
+
+{% block content %}
+<h1>Knowledge Base</h1>
+<p class="subtitle">{{ entries|length }} Q&A pairs &middot; Reusable memory for screening questions</p>
+
+<div class="card">
+  <h3>Add Entry</h3>
+  <form id="add-form" style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+    <div class="form-group">
+      <label>Question</label>
+      <input name="question" placeholder="e.g. Do you have experience with Python?" required>
+    </div>
+    <div class="form-group">
+      <label>Answer</label>
+      <input name="answer" placeholder="e.g. Yes, 5 years" required>
+    </div>
+    <div class="form-group" style="grid-column:1/-1">
+      <label>Context Tags (optional)</label>
+      <input name="context_tags" placeholder="e.g. python, senior, backend">
+    </div>
+    <div class="form-group" style="grid-column:1/-1">
+      <button type="submit" class="btn btn-primary">Save</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="flex-between mb-1">
+    <h3>Stored Knowledge</h3>
+    <input id="search" placeholder="Search..." style="max-width:300px" oninput="filterTable()">
+  </div>
+  <table id="knowledge-table">
+    <tr>
+      <th>Question</th>
+      <th>Answer</th>
+      <th>Confidence</th>
+      <th>Source</th>
+      <th>Used</th>
+      <th>Tags</th>
+      <th></th>
+    </tr>
+    {% for e in entries %}
+    <tr>
+      <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ e.question }}">{{ e.question }}</td>
+      <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ e.answer }}">{{ e.answer }}</td>
+      <td><span class="tag {% if e.confidence >= 0.8 %}tag-green{% elif e.confidence >= 0.5 %}tag-yellow{% else %}tag-red{% endif %}">{{ "%.0f"|format(e.confidence * 100) }}%</span></td>
+      <td><span class="tag">{{ e.source }}</span></td>
+      <td>{{ e.used_count }}</td>
+      <td><span class="tag">{{ e.context_tags or "—" }}</span></td>
+      <td><button class="btn btn-sm" style="background:#ef4444;color:#fff" onclick="deleteEntry({{ e.id }})">Del</button></td>
+    </tr>
+    {% endfor %}
+    {% if not entries %}
+    <tr><td colspan="7" class="text-muted" style="text-align:center;padding:2rem">No knowledge entries yet.</td></tr>
+    {% endif %}
+  </table>
+</div>
+{% endblock %}
+
+{% block extra_head %}
+<script>
+document.getElementById('add-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const res = await fetch('/api/knowledge', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(Object.fromEntries(fd)),
+  });
+  if (res.ok) location.reload();
+});
+
+async function deleteEntry(id) {
+  if (!confirm('Delete this entry?')) return;
+  await fetch('/api/knowledge/' + id, {method: 'DELETE'});
+  location.reload();
+}
+
+function filterTable() {
+  const q = document.getElementById('search').value.toLowerCase();
+  document.querySelectorAll('#knowledge-table tr:not(:first-child)').forEach(row => {
+    row.style.display = row.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+</script>
+{% endblock %}

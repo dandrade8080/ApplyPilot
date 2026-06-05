@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Alerts — ApplyPilot{% endblock %}
+
+{% block content %}
+<h1>Alerts</h1>
+<p class="subtitle">{{ pending|length }} pending &middot; Questions the engine couldn't answer confidently</p>
+
+{% if pending %}
+<div class="card">
+  <h3>Pending Alerts</h3>
+  {% for a in pending %}
+  <div style="border:1px solid #334155;border-radius:8px;padding:1rem;margin-bottom:1rem" id="alert-{{ a.id }}">
+    <div class="flex-between">
+      <div>
+        <strong>{{ a.question }}</strong>
+        {% if a.suggested_answer %}
+        <div style="font-size:0.8rem;color:#94a3b8;margin-top:0.3rem">Suggested answer: <em>{{ a.suggested_answer }}</em></div>
+        {% endif %}
+        {% if a.context %}
+        <div style="font-size:0.75rem;color:#64748b;margin-top:0.2rem">{{ a.context }}</div>
+        {% endif %}
+      </div>
+      <div style="text-align:right;font-size:0.75rem;color:#64748b">
+        <div>{{ a.job_title }}</div>
+        <div>{{ a.created_at[:10] }}</div>
+      </div>
+    </div>
+    <div style="margin-top:0.75rem;display:flex;gap:0.5rem">
+      <input id="answer-input-{{ a.id }}" placeholder="Type your answer..." style="flex:1"
+             onkeydown="if(event.key==='Enter') answerAlert({{ a.id }})">
+      <button class="btn btn-primary btn-sm" onclick="answerAlert({{ a.id }})">Answer</button>
+      <button class="btn btn-sm" style="background:#334155;color:#94a3b8" onclick="dismissAlert({{ a.id }})">Dismiss</button>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h3>All Alerts</h3>
+  <table>
+    <tr>
+      <th>Question</th>
+      <th>Job</th>
+      <th>Answer</th>
+      <th>Status</th>
+      <th>Date</th>
+    </tr>
+    {% for a in all_alerts %}
+    <tr>
+      <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ a.question }}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ a.job_title }}</td>
+      <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ a.answer or "—" }}</td>
+      <td><span class="tag {% if a.status == 'pending' %}tag-yellow{% elif a.status == 'answered' %}tag-green{% else %}tag{% endif %}">{{ a.status }}</span></td>
+      <td style="white-space:nowrap">{{ a.created_at[:10] }}</td>
+    </tr>
+    {% endfor %}
+    {% if not all_alerts %}
+    <tr><td colspan="5" class="text-muted" style="text-align:center;padding:2rem">No alerts yet.</td></tr>
+    {% endif %}
+  </table>
+</div>
+{% endblock %}
+
+{% block extra_head %}
+<script>
+async function answerAlert(id) {
+  const input = document.getElementById('answer-input-' + id);
+  const answer = input.value.trim();
+  if (!answer) return;
+  const res = await fetch('/api/alerts/' + id + '/answer', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({answer}),
+  });
+  if (res.ok) {
+    document.getElementById('alert-' + id).style.opacity = '0.3';
+    input.value = '';
+  }
+}
+
+async function dismissAlert(id) {
+  await fetch('/api/alerts/' + id + '/dismiss', {method: 'POST'});
+  document.getElementById('alert-' + id).style.display = 'none';
+}
+</script>
+{% endblock %}

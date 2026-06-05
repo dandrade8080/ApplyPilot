@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Pipeline — ApplyPilot{% endblock %}
+
+{% block content %}
+<h1>Pipeline Stages</h1>
+<p class="subtitle">6-stage autonomous job application pipeline</p>
+
+<div class="grid-3">
+  {% for stage in stages %}
+  <div class="card" style="position:relative">
+    <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem">
+      <div style="width:2rem;height:2rem;border-radius:8px;background:#60a5fa22;color:#60a5fa;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.9rem">{{ loop.index }}</div>
+      <div>
+        <div style="font-weight:600">{{ stage.name|capitalize }}</div>
+        <div class="text-muted" style="font-size:0.75rem">{{ stage.desc }}</div>
+      </div>
+    </div>
+    {% set stage_stats = {
+      'discover': stats.get('total', 0),
+      'enrich': stats.get('with_description', 0),
+      'score': stats.get('scored', 0),
+      'tailor': stats.get('tailored', 0),
+      'cover': stats.get('with_cover_letter', 0),
+      'pdf': stats.get('tailored', 0),
+    } %}
+    <div class="text-green" style="font-size:1.5rem;font-weight:700">{{ stage_stats.get(stage.name, 0) }}</div>
+    <div class="text-muted" style="font-size:0.75rem">completed</div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card mt-2">
+  <h3>Pipeline Controls</h3>
+  <div class="flex gap-2 mb-1" style="flex-wrap:wrap">
+    <button class="btn btn-primary" onclick="runStages(['all'])" id="btn-all">Run All</button>
+    <button class="btn btn-primary" onclick="runStages(['discover','enrich'])" id="btn-de">Discover + Enrich</button>
+    <button class="btn btn-primary" onclick="runStages(['score','tailor','cover','pdf'])" id="btn-stcp">Score → Tailor → Cover → PDF</button>
+    <button class="btn" style="background:#ef4444;color:#fff" onclick="cancelPipeline()" id="btn-cancel" disabled>Cancel</button>
+  </div>
+  <div id="pipeline-status" class="text-muted" style="font-size:0.85rem">Idle</div>
+</div>
+
+<div class="card">
+  <h3>Pipeline Overview</h3>
+  <table>
+    <tr><th>Stage</th><th>Description</th><th>Count</th></tr>
+    <tr><td><strong>1. Discover</strong></td><td>JobSpy + Workday + smart extract</td><td>{{ stats.get('total', 0) }}</td></tr>
+    <tr><td><strong>2. Enrich</strong></td><td>Full description extraction</td><td>{{ stats.get('with_description', 0) }}</td></tr>
+    <tr><td><strong>3. Score</strong></td><td>AI fit scoring (1-10)</td><td>{{ stats.get('scored', 0) }}</td></tr>
+    <tr><td><strong>4. Tailor</strong></td><td>Per-job resume tailoring</td><td>{{ stats.get('tailored', 0) }}</td></tr>
+    <tr><td><strong>5. Cover Letter</strong></td><td>Targeted cover letters</td><td>{{ stats.get('with_cover_letter', 0) }}</td></tr>
+    <tr><td><strong>6. Auto-Apply</strong></td><td>Browser-based submission</td><td>{{ stats.get('applied', 0) }}</td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h3>Quick Reference</h3>
+  <pre style="background:#0f172a;padding:1rem;border-radius:8px;font-size:0.85rem;color:#cbd5e1">
+applypilot run                         # all stages, sequential
+applypilot run --stream                # all stages, concurrent
+applypilot run discover enrich         # specific stages
+applypilot run --workers 4             # parallel (4 threads)</pre>
+</div>
+{% endblock %}
+
+{% block extra_head %}
+<script>
+let pollTimer = null;
+
+async function runStages(stages) {
+  document.getElementById('pipeline-status').textContent = 'Starting pipeline...';
+  document.getElementById('btn-cancel').disabled = false;
+  const res = await fetch('/api/pipeline/run', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({stages: stages === ['all'] ? ['discover','enrich','score','tailor','cover','pdf'] : stages}),
+  });
+  const data = await res.json();
+  if (data.error) {
+    document.getElementById('pipeline-status').textContent = 'Error: ' + data.error;
+    return;
+  }
+  startPolling();
+}
+
+async function cancelPipeline() {
+  await fetch('/api/pipeline/cancel', {method: 'POST'});
+  document.getElementById('pipeline-status').textContent = 'Cancelled';
+  document.getElementById('btn-cancel').disabled = true;
+  if (pollTimer) clearInterval(pollTimer);
+}
+
+async function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    const res = await fetch('/api/pipeline/status');
+    const data = await res.json();
+    if (data.running) {
+      document.getElementById('pipeline-status').textContent = 'Pipeline running...';
+    } else {
+      document.getElementById('pipeline-status').textContent = 'Pipeline completed';
+      document.getElementById('btn-cancel').disabled = true;
+      clearInterval(pollTimer);
+      pollTimer = null;
+      setTimeout(() => location.reload(), 2000);
+    }
+  }, 3000);
+}
+</script>
+{% endblock %}

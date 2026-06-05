@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}ApplyPilot Dashboard{% endblock %}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #0f172a; color: #e2e8f0; display: flex; min-height: 100vh; }
+  a { color: #60a5fa; text-decoration: none; }
+  a:hover { color: #93c5fd; }
+
+  /* Sidebar */
+  .sidebar { width: 240px; background: #1e293b; padding: 1.5rem; flex-shrink: 0; border-right: 1px solid #334155; }
+  .sidebar h2 { font-size: 1.1rem; font-weight: 700; margin-bottom: 1.5rem; color: #e2e8f0; }
+  .sidebar h2 span { color: #60a5fa; }
+  .sidebar nav { display: flex; flex-direction: column; gap: 0.25rem; }
+  .sidebar nav a { display: block; padding: 0.5rem 0.75rem; border-radius: 6px; color: #94a3b8; font-size: 0.9rem; transition: all 0.15s; }
+  .sidebar nav a:hover { background: #334155; color: #e2e8f0; }
+  .sidebar nav a.active { background: #60a5fa22; color: #60a5fa; font-weight: 600; }
+
+  /* Main content */
+  .main { flex: 1; padding: 2rem; overflow-y: auto; }
+
+  h1 { font-size: 1.6rem; font-weight: 700; margin-bottom: 0.5rem; }
+  .subtitle { color: #94a3b8; margin-bottom: 2rem; }
+
+  /* Cards */
+  .card { background: #1e293b; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; }
+  .card h3 { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; color: #94a3b8; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+  th { text-align: left; padding: 0.6rem 0.75rem; color: #94a3b8; font-weight: 600; border-bottom: 1px solid #334155; }
+  td { padding: 0.6rem 0.75rem; border-bottom: 1px solid #1e293b; }
+
+  /* Buttons */
+  .btn { display: inline-block; padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.8rem; font-weight: 500; cursor: pointer; border: none; transition: all 0.15s; }
+  .btn-primary { background: #60a5fa; color: #0f172a; }
+  .btn-primary:hover { background: #93c5fd; }
+  .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.75rem; }
+
+  /* Forms */
+  input, textarea, select { background: #334155; border: 1px solid #475569; color: #e2e8f0; padding: 0.5rem 0.75rem; border-radius: 6px; font-size: 0.85rem; font-family: inherit; width: 100%; }
+  input:focus, textarea:focus { outline: none; border-color: #60a5fa; }
+  label { display: block; font-size: 0.8rem; color: #94a3b8; margin-bottom: 0.3rem; font-weight: 500; }
+  .form-group { margin-bottom: 1rem; }
+  textarea { resize: vertical; min-height: 80px; }
+
+  /* Tags */
+  .tag { display: inline-block; font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 4px; background: #334155; color: #94a3b8; }
+  .tag-green { background: #064e3b; color: #6ee7b7; }
+  .tag-blue { background: #1e3a5f; color: #93c5fd; }
+  .tag-yellow { background: #78350f; color: #fbbf24; }
+  .tag-red { background: #7f1d1d; color: #fca5a5; }
+
+  /* Status colors */
+  .text-green { color: #10b981; }
+  .text-yellow { color: #f59e0b; }
+  .text-red { color: #ef4444; }
+  .text-blue { color: #60a5fa; }
+
+  /* Grid */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+
+  /* Misc */
+  .text-muted { color: #64748b; }
+  .mt-2 { margin-top: 2rem; }
+  .mb-1 { margin-bottom: 1rem; }
+  .flex { display: flex; }
+  .flex-between { display: flex; justify-content: space-between; align-items: center; }
+  .gap-1 { gap: 0.5rem; }
+  .gap-2 { gap: 1rem; }
+
+  @media (max-width: 768px) {
+    body { flex-direction: column; }
+    .sidebar { width: 100%; padding: 1rem; }
+    .sidebar nav { flex-direction: row; flex-wrap: wrap; }
+    .main { padding: 1rem; }
+    .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  }
+</style>
+{% block extra_head %}{% endblock %}
+</head>
+<body>
+  <div class="sidebar">
+    <h2>Apply<span>Pilot</span></h2>
+    <nav>
+      <a href="{{ url_for('dashboard.index') }}" class="{% if request.endpoint == 'dashboard.index' %}active{% endif %}">Dashboard</a>
+      <a href="{{ url_for('dashboard.profile') }}" class="{% if request.endpoint == 'dashboard.profile' %}active{% endif %}">Profile</a>
+      <a href="{{ url_for('dashboard.jobs') }}" class="{% if request.endpoint == 'dashboard.jobs' %}active{% endif %}">Jobs</a>
+      <a href="{{ url_for('dashboard.pipeline') }}" class="{% if request.endpoint == 'dashboard.pipeline' %}active{% endif %}">Pipeline</a>
+      <a href="{{ url_for('dashboard.apply_queue_page') }}" class="{% if request.endpoint == 'dashboard.apply_queue_page' %}active{% endif %}">Apply Queue</a>
+      <a href="{{ url_for('dashboard.knowledge_page') }}" class="{% if request.endpoint == 'dashboard.knowledge_page' %}active{% endif %}">Knowledge</a>
+      <a href="{{ url_for('dashboard.alerts_page') }}" class="{% if request.endpoint == 'dashboard.alerts_page' %}active{% endif %}">Alerts</a>
+      <a href="{{ url_for('dashboard.alerts_page') }}" class="{% if request.endpoint == 'dashboard.alerts_page' %}active{% endif %}">Alerts</a>
+      <a href="{{ url_for('dashboard.filters_page') }}" class="{% if request.endpoint == 'dashboard.filters_page' %}active{% endif %}">Filters</a>
+      <a href="{{ url_for('dashboard.config_view') }}" class="{% if request.endpoint == 'dashboard.config_view' %}active{% endif %}">Config</a>
+    </nav>
+  </div>
+  <div class="main">
+    {% block content %}{% endblock %}
+  </div>
+</body>
+</html>

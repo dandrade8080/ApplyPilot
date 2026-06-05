@@ -132,6 +132,65 @@ def init_db(db_path: Path | str | None = None) -> sqlite3.Connection:
             verification_confidence TEXT
         )
     """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS knowledge (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            question      TEXT NOT NULL,
+            answer        TEXT NOT NULL,
+            source        TEXT DEFAULT 'llm',
+            confidence    REAL DEFAULT 1.0,
+            context_tags  TEXT DEFAULT '',
+            used_count    INTEGER DEFAULT 0,
+            created_at    TEXT,
+            updated_at    TEXT
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS alerts (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_url       TEXT,
+            job_title     TEXT,
+            field_label   TEXT,
+            question      TEXT NOT NULL,
+            context       TEXT DEFAULT '',
+            suggested_answer TEXT DEFAULT '',
+            status        TEXT DEFAULT 'pending',
+            answered_at   TEXT,
+            answer        TEXT,
+            created_at    TEXT
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS apply_queue (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_url       TEXT NOT NULL UNIQUE,
+            job_title     TEXT,
+            priority      INTEGER DEFAULT 0,
+            status        TEXT DEFAULT 'queued',
+            started_at    TEXT,
+            finished_at   TEXT,
+            result        TEXT,
+            error         TEXT,
+            created_at    TEXT
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS pipeline_runs (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            stage         TEXT NOT NULL,
+            status        TEXT DEFAULT 'running',
+            total_jobs    INTEGER DEFAULT 0,
+            processed     INTEGER DEFAULT 0,
+            errors        INTEGER DEFAULT 0,
+            started_at    TEXT,
+            finished_at   TEXT,
+            trigger       TEXT DEFAULT 'manual'
+        )
+    """)
     conn.commit()
 
     # Run migrations for any columns added after initial schema

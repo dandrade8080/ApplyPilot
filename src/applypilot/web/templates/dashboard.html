@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — ApplyPilot{% endblock %}
+{% set stats = stats or {} %}
+
+{% block content %}
+<h1>Pipeline Dashboard</h1>
+<p class="subtitle">{{ stats.get('total', 0) }} jobs &middot; {{ stats.get('scored', 0) }} scored &middot; {{ stats.get('untailored_eligible', 0) }} pending tailoring</p>
+
+<div class="card" style="background:#1a3a5f;border:1px solid #2563eb">
+  <div class="flex-between">
+    <div>
+      <h3 style="color:#93c5fd;margin:0">Aplicação Automática</h3>
+      <p class="text-muted" style="margin-top:0.3rem">
+        {% set qc = stats.get('queue_counts', {}) %}
+        Fila: <strong>{{ qc.get('queued', 0) }}</strong> aguardando |
+        <strong>{{ qc.get('processing', 0) }}</strong> processando |
+        <strong>{{ qc.get('completed', 0) }}</strong> concluídos |
+        <strong>{{ qc.get('failed', 0) }}</strong> falhas
+        {% if stats.get('alert_count', 0) > 0 %}
+        | <span style="color:#fbbf24">{{ stats.alert_count }} alertas pendentes</span>
+        {% endif %}
+      </p>
+    </div>
+    <div class="flex gap-1">
+      <button class="btn" onclick="applyReady()" id="btn-ready"
+              style="font-size:0.9rem;padding:0.5rem 1rem;font-weight:600;background:#059669;color:#fff">
+        ▶ Aplicar Prontas
+      </button>
+      <button class="btn btn-primary" onclick="startApplying()" id="btn-apply"
+              style="font-size:1rem;padding:0.6rem 1.5rem;font-weight:700">
+        ▶ Pipeline + Aplicar
+      </button>
+      <a href="{{ url_for('dashboard.filters_page') }}" class="btn"
+         style="font-size:0.85rem;padding:0.5rem 1rem;background:#334155;color:#94a3b8;align-self:center">
+        ⚙ Editar Filtros
+      </a>
+    </div>
+  </div>
+  <div id="apply-status" class="text-muted" style="margin-top:0.5rem;font-size:0.85rem"></div>
+  <div id="apply-progress" style="margin-top:0.5rem;display:none">
+    <div style="height:6px;background:#334155;border-radius:3px;overflow:hidden">
+      <div id="progress-bar" style="height:100%;width:0%;background:#60a5fa;border-radius:3px;transition:width 0.5s"></div>
+    </div>
+  </div>
+</div>
+
+<div class="grid-4 mb-1">
+  <div class="card" style="text-align:center">
+    <div class="text-blue" style="font-size:2rem;font-weight:700">{{ stats.get('total', 0) }}</div>
+    <div class="text-muted" style="font-size:0.8rem">Total Jobs</div>
+  </div>
+  <div class="card" style="text-align:center">
+    <div class="text-green" style="font-size:2rem;font-weight:700">{{ stats.get('with_description', 0) }}</div>
+    <div class="text-muted" style="font-size:0.8rem">With Description</div>
+  </div>
+  <div class="card" style="text-align:center">
+    <div class="text-yellow" style="font-size:2rem;font-weight:700">{{ stats.get('scored', 0) }}</div>
+    <div class="text-muted" style="font-size:0.8rem">Scored by LLM</div>
+  </div>
+  <div class="card" style="text-align:center">
+    <div class="text-green" style="font-size:2rem;font-weight:700">{{ stats.get('tailored', 0) }}</div>
+    <div class="text-muted" style="font-size:0.8rem">Tailored Resumes</div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <h3>Pipeline Progress</h3>
+    <table>
+      <tr><th>Metric</th><th>Count</th></tr>
+      <tr><td>Total discovered</td><td>{{ stats.get('total', 0) }}</td></tr>
+      <tr><td>With description</td><td>{{ stats.get('with_description', 0) }}</td></tr>
+      <tr><td>Pending enrichment</td><td>{{ stats.get('pending_detail', 0) }}</td></tr>
+      <tr><td>Enrichment errors</td><td>{{ stats.get('detail_errors', 0) }}</td></tr>
+      <tr><td>Scored by LLM</td><td>{{ stats.get('scored', 0) }}</td></tr>
+      <tr><td>Pending scoring</td><td>{{ stats.get('unscored', 0) }}</td></tr>
+      <tr><td>Tailored resumes</td><td>{{ stats.get('tailored', 0) }}</td></tr>
+      <tr><td>Pending tailoring (7+)</td><td>{{ stats.get('untailored_eligible', 0) }}</td></tr>
+      <tr><td>Cover letters</td><td>{{ stats.get('with_cover_letter', 0) }}</td></tr>
+      <tr><td>Ready to apply</td><td>{{ stats.get('ready_to_apply', 0) }}</td></tr>
+      <tr><td>Applied</td><td>{{ stats.get('applied', 0) }}</td></tr>
+      <tr><td>Apply errors</td><td>{{ stats.get('apply_errors', 0) }}</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Score Distribution</h3>
+    {% if stats.get('score_distribution') %}
+      {% set max_count = stats['score_distribution']|map(attribute=1)|max or 1 %}
+      {% for score, count in stats['score_distribution'] %}
+        {% set pct = (count / max_count * 100) if max_count else 0 %}
+        {% set color = '#10b981' if score >= 7 else ('#f59e0b' if score >= 5 else '#ef4444') %}
+        <div class="flex" style="align-items:center;gap:0.5rem;margin-bottom:0.4rem">
+          <span style="width:1.5rem;text-align:right;font-size:0.85rem;font-weight:600">{{ score }}</span>
+          <div style="flex:1;height:14px;background:#334155;border-radius:4px;overflow:hidden">
+            <div style="height:100%;width:{{ pct }}%;background:{{ color }};border-radius:4px;transition:width 0.3s"></div>
+          </div>
+          <span style="width:2rem;font-size:0.8rem;color:#94a3b8">{{ count }}</span>
+        </div>
+      {% endfor %}
+    {% else %}
+      <p class="text-muted">No scores yet. Run the pipeline to see distribution.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card mt-2">
+  <h3>Jobs by Source</h3>
+  {% if stats.get('by_site') %}
+    <table>
+      <tr><th>Site</th><th>Count</th></tr>
+      {% for site, count in stats['by_site'] %}
+        <tr><td>{{ site or 'Unknown' }}</td><td>{{ count }}</td></tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p class="text-muted">No jobs discovered yet.</p>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+  #progress-bar.pulse {
+    animation: pulseAnim 1.5s ease-in-out infinite;
+  }
+  @keyframes pulseAnim {
+    0% { opacity: 0.4; }
+    50% { opacity: 1; }
+    100% { opacity: 0.4; }
+  }
+</style>
+<script>
+let pollTimer = null;
+
+// Re-fetch status when tab becomes visible again
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && pollTimer) {
+    // Immediately fetch status when user returns to tab
+    fetchStatus();
+  }
+});
+
+async function startApplying() {
+  await _startWith({skip_pipeline: false});
+}
+
+async function applyReady() {
+  await _startWith({skip_pipeline: true});
+}
+
+async function _startWith(opts) {
+  const btn = opts.skip_pipeline ? document.getElementById('btn-ready') : document.getElementById('btn-apply');
+  const otherBtn = opts.skip_pipeline ? document.getElementById('btn-apply') : document.getElementById('btn-ready');
+  const status = document.getElementById('apply-status');
+  const progressDiv = document.getElementById('apply-progress');
+  const progressBar = document.getElementById('progress-bar');
+
+  btn.disabled = true;
+  otherBtn.disabled = true;
+  btn.textContent = '⏳...';
+  status.textContent = opts.skip_pipeline ? 'Enfileirando vagas prontas...' : 'Iniciando pipeline...';
+  progressDiv.style.display = 'block';
+  progressBar.style.width = '0%';
+  progressBar.classList.remove('pulse');
+
+  const res = await fetch('/api/start-applying', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(opts),
+  });
+  const data = await res.json();
+  if (data.error) {
+    status.textContent = 'Erro: ' + data.error;
+    btn.disabled = false;
+    otherBtn.disabled = false;
+    btn.textContent = opts.skip_pipeline ? '▶ Aplicar Prontas' : '▶ Pipeline + Aplicar';
+    return;
+  }
+  startPolling();
+}
+
+async function fetchStatus() {
+  try {
+    const res = await fetch('/api/pipeline/status');
+    const data = await res.json();
+    const status = document.getElementById('apply-status');
+    const btnApply = document.getElementById('btn-apply');
+    const btnReady = document.getElementById('btn-ready');
+    const progressDiv = document.getElementById('apply-progress');
+    const progressBar = document.getElementById('progress-bar');
+
+    if (data.running) {
+      status.textContent = data.message || 'Executando...';
+      if (data.total > 0) {
+        const pct = Math.min(100, Math.round((data.progress / data.total) * 100));
+        progressBar.style.width = pct + '%';
+        progressBar.classList.remove('pulse');
+      } else {
+        // No total known yet — show animated pulse to indicate it's alive
+        progressBar.style.width = '30%';
+        progressBar.classList.add('pulse');
+      }
+    } else {
+      clearInterval(pollTimer);
+      pollTimer = null;
+      btnApply.disabled = false;
+      btnReady.disabled = false;
+      btnApply.textContent = '▶ Pipeline + Aplicar';
+      btnReady.textContent = '▶ Aplicar Prontas';
+      status.textContent = '✓ ' + (data.message || 'Concluído!');
+      progressBar.style.width = '100%';
+      progressBar.classList.remove('pulse');
+      setTimeout(() => {
+        progressDiv.style.display = 'none';
+        location.reload();
+      }, 3000);
+    }
+  } catch (e) {
+    // Silently retry on next poll
+  }
+}
+
+async function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  await fetchStatus(); // Immediate first fetch
+  pollTimer = setInterval(fetchStatus, 2000);
+}
+</script>
+{% endblock %}
+
+{% block extra_style %}
+<style>
+  #progress-bar.pulse {
+    animation: pulseAnim 1.5s ease-in-out infinite;
+  }
+  @keyframes pulseAnim {
+    0% { opacity: 0.4; }
+    50% { opacity: 1; }
+    100% { opacity: 0.4; }
+  }
+</style>
+{% endblock %}

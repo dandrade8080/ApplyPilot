@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}Edit Profile — ApplyPilot{% endblock %}
+
+{% block extra_head %}
+<style>
+  .import-section { background: #1e3a5f; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; border: 1px solid #60a5fa33; }
+  .import-row { display: flex; gap: 0.75rem; align-items: center; }
+  .import-row input { flex: 1; }
+  .import-status { margin-top: 0.5rem; font-size: 0.85rem; }
+  .import-spinner { display: none; width: 16px; height: 16px; border: 2px solid #60a5fa33; border-top-color: #60a5fa; border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="flex-between mb-1">
+  <h1>Edit Profile</h1>
+  <a href="{{ url_for('dashboard.profile') }}" class="btn btn-primary">View Profile</a>
+</div>
+
+{% if saved %}
+<div class="card" style="border-left:3px solid #10b981">
+  <p class="text-green">Profile saved successfully!</p>
+</div>
+{% endif %}
+
+<div class="import-section">
+  <h3 style="margin-bottom:0.75rem">Import from LinkedIn</h3>
+  <p class="text-muted" style="font-size:0.85rem;margin-bottom:0.75rem">Paste your LinkedIn profile URL to auto-fill your information.</p>
+  <div class="import-row">
+    <input type="text" id="linkedin-url" placeholder="https://linkedin.com/in/your-profile" value="{{ profile.get('linkedin', '') }}">
+    <button class="btn btn-primary" onclick="importLinkedIn()" id="import-btn">Import</button>
+    <div class="import-spinner" id="import-spinner"></div>
+  </div>
+  <div class="import-status" id="import-status"></div>
+</div>
+
+<form method="POST" action="{{ url_for('dashboard.profile_edit') }}">
+  <div class="card">
+    <h3>Personal Information</h3>
+    <div class="grid-2">
+      <div class="form-group">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" value="{{ profile.get('name', '') }}">
+      </div>
+      <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" value="{{ profile.get('email', '') }}">
+      </div>
+      <div class="form-group">
+        <label for="phone">Phone</label>
+        <input type="text" id="phone" name="phone" value="{{ profile.get('phone', '') }}">
+      </div>
+      <div class="form-group">
+        <label for="location">Location</label>
+        <input type="text" id="location" name="location" value="{{ profile.get('location', '') }}">
+      </div>
+      <div class="form-group">
+        <label for="linkedin">LinkedIn URL</label>
+        <input type="text" id="linkedin" name="linkedin" value="{{ profile.get('linkedin', '') }}">
+      </div>
+      <div class="form-group">
+        <label for="github">GitHub URL</label>
+        <input type="text" id="github" name="github" value="{{ profile.get('github', '') }}">
+      </div>
+      <div class="form-group">
+        <label for="portfolio">Portfolio URL</label>
+        <input type="text" id="portfolio" name="portfolio" value="{{ profile.get('portfolio', '') }}">
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Professional Headline</h3>
+    <div class="form-group">
+      <input type="text" id="headline" name="headline" value="{{ profile.get('headline', '') }}" placeholder="e.g. Senior Software Engineer at Company">
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Skills</h3>
+    <div class="form-group">
+      <textarea id="skills" name="skills" rows="4" placeholder="Python, JavaScript, React, AWS...">{{ profile.get('skills', [])|join(', ') if profile.get('skills') is iterable and profile.get('skills') is not string else profile.get('skills', '') }}</textarea>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Summary / About</h3>
+    <div class="form-group">
+      <textarea id="summary" name="summary" rows="6">{{ profile.get('about') or profile.get('summary', '') }}</textarea>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Work Experience</h3>
+    <div class="form-group">
+      <textarea id="experience" name="experience" rows="8" placeholder="Company | Role | Dates | Description">{{ profile.get('experience_text', '') }}</textarea>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Education</h3>
+    <div class="form-group">
+      <textarea id="education" name="education" rows="4" placeholder="School | Degree | Field | Dates">{{ profile.get('education_text', '') }}</textarea>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Resume (plain text)</h3>
+    <div class="form-group">
+      <textarea id="resume_text" name="resume" rows="20" style="font-family:monospace;font-size:0.8rem">{{ resume if resume else '' }}</textarea>
+    </div>
+  </div>
+
+  <div style="text-align:right">
+    <button type="submit" class="btn btn-primary" style="padding:0.6rem 1.5rem">Save Profile</button>
+  </div>
+</form>
+
+<script>
+function importLinkedIn() {
+  const url = document.getElementById('linkedin-url').value.trim();
+  if (!url) {
+    document.getElementById('import-status').innerHTML = '<span class="text-red">Please enter a LinkedIn URL</span>';
+    return;
+  }
+
+  const btn = document.getElementById('import-btn');
+  const spinner = document.getElementById('import-spinner');
+  const status = document.getElementById('import-status');
+
+  btn.disabled = true;
+  spinner.style.display = 'inline-block';
+  status.innerHTML = '<span class="text-blue">Fetching profile data...</span>';
+
+  fetch('{{ url_for("dashboard.profile_import_linkedin") }}', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'linkedin_url=' + encodeURIComponent(url),
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.error) {
+      status.innerHTML = '<span class="text-red">Error: ' + data.error + '</span>';
+      return;
+    }
+    if (data.name) document.getElementById('name').value = data.name;
+    if (data.headline) document.getElementById('headline').value = data.headline;
+    if (data.location) document.getElementById('location').value = data.location;
+    if (data.linkedin_url) document.getElementById('linkedin').value = data.linkedin_url;
+
+    if (data.about) {
+      document.getElementById('summary').value = data.about;
+    }
+
+    if (data.skills && Array.isArray(data.skills)) {
+      document.getElementById('skills').value = data.skills.join(', ');
+    }
+
+    if (data.experience && Array.isArray(data.experience) && data.experience.length) {
+      const expText = data.experience.map(e =>
+        [e.company || '', e.role || '', e.dates || '', e.description || ''].join(' | ')
+      ).join('\n');
+      document.getElementById('experience').value = expText;
+    }
+
+    if (data.education && Array.isArray(data.education) && data.education.length) {
+      const eduText = data.education.map(e =>
+        [e.school || '', e.degree || '', e.field || '', e.dates || ''].join(' | ')
+      ).join('\n');
+      document.getElementById('education').value = eduText;
+    }
+
+    status.innerHTML = '<span class="text-green">Profile imported successfully from LinkedIn!</span>';
+  })
+  .catch(err => {
+    status.innerHTML = '<span class="text-red">Error: ' + err.message + '</span>';
+  })
+  .finally(() => {
+    btn.disabled = false;
+    spinner.style.display = 'none';
+  });
+}
+</script>
+{% endblock %}

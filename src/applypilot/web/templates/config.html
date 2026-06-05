@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Config — ApplyPilot{% endblock %}
+
+{% block content %}
+<h1>Configuration</h1>
+<p class="subtitle">Environment variables and paths</p>
+
+<div class="grid-2">
+  <div class="card">
+    <h3>Environment Variables</h3>
+    <table>
+      {% for key, val in env_vars.items() %}
+      <tr>
+        <td style="color:#94a3b8;width:180px">{{ key }}</td>
+        <td>
+          {% if val %}
+            {% if 'KEY' in key and val|length > 10 %}
+              <span class="tag tag-green">Set</span>
+            {% else %}
+              {{ val }}
+            {% endif %}
+          {% else %}
+            <span class="tag">Not set</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+
+  <div class="card">
+    <h3>Paths</h3>
+    <table>
+      {% for key, val in config.items() %}
+      <tr>
+        <td style="color:#94a3b8;width:160px">{{ key|replace('_', ' ') }}</td>
+        <td style="font-size:0.75rem;word-break:break-all">{{ val }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+
+{% if env_content %}
+<div class="card">
+  <h3>.env File</h3>
+  <pre style="background:#0f172a;padding:1rem;border-radius:8px;font-size:0.85rem;color:#cbd5e1;max-height:300px;overflow-y:auto">{{ env_content }}</pre>
+</div>
+{% endif %}
+{% endblock %}

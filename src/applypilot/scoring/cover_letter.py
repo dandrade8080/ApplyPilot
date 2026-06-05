@@ -65,53 +65,55 @@ def _build_cover_letter_prompt(profile: dict) -> str:
     all_banned = ", ".join(f'"{w}"' for w in BANNED_WORDS)
     leak_banned = ", ".join(f'"{p}"' for p in LLM_LEAK_PHRASES)
 
-    return f"""Write a cover letter for {sign_off_name}. The goal is to get an interview.
+    return f"""Escreva uma carta de apresentação para {sign_off_name}. O objetivo é conseguir uma entrevista.
 
-STRUCTURE: 3 short paragraphs. Under 250 words. Every sentence must earn its place.
+IMPORTANTE: Escreva a carta EM PORTUGUÊS BRASILEIRO. Use "Prezado(a) Gerente de Contratação," no início.
 
-PARAGRAPH 1 (2-3 sentences): Open with a specific thing YOU built that solves THEIR problem. Not "I'm excited about this role." Not "This role aligns with my experience." Start with the work.
+ESTRUTURA: 3 parágrafos curtos. Menos de 250 palavras. Cada frase deve merecer seu lugar.
 
-PARAGRAPH 2 (3-4 sentences): Pick 2 achievements from the resume that are MOST relevant to THIS job. Use numbers. Frame as solving their problem, not listing your accomplishments.{projects_hint}{metrics_hint}
+PARÁGRAFO 1 (2-3 frases): Abra com algo específico que VOCÊ construiu que resolve o PROBLEMA deles. Não use "Estou animado com esta vaga." Não use "Esta vaga está alinhada com minha experiência." Comece com o trabalho.
 
-PARAGRAPH 3 (1-2 sentences): One specific thing about the company from the job description (a product, a technical challenge, a team structure). Then close. "Happy to walk through any of this in more detail." or "Let's discuss." Nothing else.
+PARÁGRAFO 2 (3-4 frases): Escolha 2 realizações do currículo que são MAIS relevantes para ESTA vaga. Use números. Mostre como resolve o problema deles, não apenas liste suas conquistas.{projects_hint}{metrics_hint}
 
-BANNED WORDS AND PHRASES (automated validator rejects ANY of these — do not use even once):
+PARÁGRAFO 3 (1-2 frases): Uma coisa específica sobre a empresa da descrição da vaga (um produto, um desafio técnico, uma estrutura de time). Depois feche. "Estou à disposição para conversar sobre isso em mais detalhes." ou "Vamos conversar." Nada mais.
+
+PALAVRAS E FRASES PROIBIDAS (o validador automático rejeita QUALQUER uma delas — não use nenhuma):
 {all_banned}
 
-ALSO BANNED (meta-commentary the validator catches):
+TAMBÉM PROIBIDO (metacomentário que o validador detecta):
 {leak_banned}
 
-BANNED PUNCTUATION: No em dashes (—) or en dashes (–). Use commas or periods.
+PONTUAÇÃO PROIBIDA: Sem travessões (—) ou (–). Use vírgulas ou pontos.
 
-VOICE:
-- Write like a real engineer emailing someone they respect. Not formal, not casual. Just direct.
-- NEVER narrate or explain what you're doing. BAD: "This demonstrates my commitment to X." GOOD: Just state the fact and move on.
-- NEVER hedge. BAD: "might address some of your challenges." GOOD: "solves the same problem your team is facing."
-- Every sentence should contain either a number, a tool name, or a specific outcome. If it doesn't, cut it.
-- Read it out loud. If it sounds like a robot wrote it, rewrite it.
+VOZ:
+- Escreva como um profissional experiente escrevendo para alguém que respeita. Nem formal, nem casual. Apenas direto.
+- NUNCA narre ou explique o que está fazendo. RUIM: "Isso demonstra meu compromisso com X." BOM: Apenas declare o fato.
+- NUNCA hesite. RUIM: "talvez resolva alguns dos seus desafios." BOM: "resolve o mesmo problema que seu time enfrenta."
+- Toda frase deve conter um número, uma ferramenta ou um resultado específico. Se não tiver, corte.
+- Leia em voz alta. Se parecer robô, reescreva.
 
-FABRICATION = INSTANT REJECTION:
-The candidate's real tools are ONLY: {skills_str}.
-Do NOT mention ANY tool not in this list. If the job asks for tools not listed, talk about the work you did, not the tools.
+FABRICAÇÃO = REJEÇÃO IMEDIATA:
+As ferramentas reais do candidato são APENAS: {skills_str}.
+NÃO mencione NENHUMA ferramenta fora desta lista. Se a vaga pedir ferramentas não listadas, fale sobre o trabalho que você fez, não sobre as ferramentas.
 
-Sign off: just "{sign_off_name}"
+Assinatura: apenas "{sign_off_name}"
 
-Output ONLY the letter text. No subject lines. No "Here is the cover letter:" preamble. No notes after the sign-off.
-Start DIRECTLY with "Dear Hiring Manager," and end with the name."""
+Output SOMENTE o texto da carta. Sem assunto. Sem "Aqui está a carta:".
+Comece DIRETAMENTE com "Prezado(a) Gerente de Contratação," e termine com o nome."""
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 def _strip_preamble(text: str) -> str:
-    """Remove LLM preamble before 'Dear Hiring Manager,' if present.
+    """Remove LLM preamble before 'Prezado(a) Gerente de Contratação,' if present.
 
-    Gemini and other models sometimes output "Here is the cover letter:" or
+    Gemini and other models sometimes output "Aqui está a carta:" or
     similar meta-commentary before the actual letter text. Strip everything
-    before the first occurrence of "Dear" so the validator's start-check passes.
+    before the first occurrence of "prezado" so the validator's start-check passes.
     """
-    dear_idx = text.lower().find("dear")
-    if dear_idx > 0:
-        return text[dear_idx:]
+    prezado_idx = text.lower().find("prezado")
+    if prezado_idx > 0:
+        return text[prezado_idx:]
     return text
 
 

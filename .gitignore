@@ -17,6 +17,7 @@ logs/
 
 # MCP configs (per-machine)
 .mcp*.json
+.playwright-mcp/
 
 # Python
 __pycache__/

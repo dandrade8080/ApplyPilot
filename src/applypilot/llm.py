@@ -2,9 +2,10 @@
 Unified LLM client for ApplyPilot.
 
 Auto-detects provider from environment:
-  GEMINI_API_KEY  -> Google Gemini (default: gemini-2.0-flash)
-  OPENAI_API_KEY  -> OpenAI (default: gpt-4o-mini)
-  LLM_URL         -> Local llama.cpp / Ollama compatible endpoint
+  GEMINI_API_KEY    -> Google Gemini (default: gemini-2.0-flash)
+  OPENAI_API_KEY    -> OpenAI (default: gpt-4o-mini)
+  DEEPSEEK_API_KEY  -> DeepSeek (default: deepseek-chat)
+  LLM_URL           -> Local llama.cpp / Ollama compatible endpoint
 
 LLM_MODEL env var overrides the model name for any provider.
 """
@@ -29,6 +30,7 @@ def _detect_provider() -> tuple[str, str, str]:
     """
     gemini_key = os.environ.get("GEMINI_API_KEY", "")
     openai_key = os.environ.get("OPENAI_API_KEY", "")
+    deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "")
     local_url = os.environ.get("LLM_URL", "")
     model_override = os.environ.get("LLM_MODEL", "")
 
@@ -46,6 +48,13 @@ def _detect_provider() -> tuple[str, str, str]:
             openai_key,
         )
 
+    if deepseek_key and not local_url:
+        return (
+            "https://api.deepseek.com/v1",
+            model_override or "deepseek-chat",
+            deepseek_key,
+        )
+
     if local_url:
         return (
             local_url.rstrip("/"),
@@ -55,7 +64,7 @@ def _detect_provider() -> tuple[str, str, str]:
 
     raise RuntimeError(
         "No LLM provider configured. "
-        "Set GEMINI_API_KEY, OPENAI_API_KEY, or LLM_URL in your environment."
+        "Set GEMINI_API_KEY, OPENAI_API_KEY, DEEPSEEK_API_KEY, or LLM_URL in your environment."
     )
 
 
