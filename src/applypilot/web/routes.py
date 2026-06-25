@@ -675,6 +675,13 @@ def api_alerts_answer(aid: int):
     if not answer:
         return jsonify({"error": "answer required"}), 400
     ok = answer_alert(aid, answer)
+    if ok:
+        try:
+            from applypilot.apply.ai_apply import signal_alert_answered
+            signal_alert_answered(aid)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("signal failed: %s", e)
     return jsonify({"answered": ok})
 
 
@@ -878,3 +885,108 @@ def api_job_apply():
         result = {"status": "failed", "error": str(e)[:200]}
 
     return jsonify(result)
+
+
+# ---------------------------------------------------------------------------
+# Telegram webhook (receives user responses from Telegram)
+# ---------------------------------------------------------------------------
+
+@bp.route("/api/telegram/webhook", methods=["POST"])
+def telegram_webhook():
+    """Receive Telegram bot updates (user replies to questions)."""
+    body = request.get_json(silent=True) or {}
+    message = body.get("message", {})
+    text = (message.get("text") or "").strip()
+    chat_id = str(message.get("chat", {}).get("id", ""))
+
+    if not text or not chat_id:
+        return jsonify({"ok": False}), 200
+
+    if text.startswith("/answer"):
+        parts = text.split(maxsplit=2)
+        if len(parts) >= 3:
+            try:
+                alert_id = int(parts[1])
+                answer_text = parts[2]
+                from applypilot.alerts import answer_alert, send_telegram_message
+                if answer_alert(alert_id, answer_text):
+                    try:
+                        from applypilot.apply.apply_agent import signal_alert_answered
+                        signal_alert_answered(alert_id)
+                    except Exception:
+                        pass
+                    send_telegram_message(
+                        f"Resposta salva para alerta #{alert_id}. O agente vai continuar.",
+                        chat_id=chat_id,
+                    )
+                else:
+                    send_telegram_message(
+                        f"Alerta #{alert_id} nao encontrado ou ja respondido.",
+                        chat_id=chat_id,
+                    )
+            except (ValueError, IndexError):
+                from applypilot.alerts import send_telegram_message
+                send_telegram_message(
+                    "Formato: /answer <id> <texto>",
+                    chat_id=chat_id,
+                )
+        else:
+            from applypilot.alerts import send_telegram_message
+            send_telegram_message(
+                "Use: /answer <id> <texto>",
+                chat_id=chat_id,
+            )
+    elif text == "/status":
+        from applypilot.alerts import get_pending_alerts, send_telegram_message
+        alerts = get_pending_alerts()
+        if alerts:
+            msg = f"Alertas pendentes ({len(alerts)}):\n" + "\n".join(
+                f"  #{a['id']}: {a['question'][:60]}"
+                for a in alerts[:5]
+            )
+        else:
+            msg = "Nenhum alerta pendente."
+        send_telegram_message(msg, chat_id=chat_id)
+    elif text == "/help":
+        from applypilot.alerts import send_telegram_message
+        send_telegram_message(
+            "Comandos:\n"
+            "/answer <id> <texto> - Responder alerta\n"
+            "/status - Ver alertas pendentes\n"
+            "/help - Esta mensagem",
+            chat_id=chat_id,
+        )
+    else:
+        from applypilot.alerts import send_telegram_message
+        send_telegram_message(
+            "Comando nao reconhecido. Use /help para ver os comandos.",
+            chat_id=chat_id,
+        )
+
+    return jsonify({"ok": True}), 200
+
+
+# ---------------------------------------------------------------------------
+# Knowledge base API
+# ---------------------------------------------------------------------------
+
+@bp.route("/api/knowledge", methods=["GET"])
+def api_knowledge_list():
+    from applypilot.knowledge import get_all_knowledge
+    entries = get_all_knowledge(limit=100)
+    return jsonify([{
+        "id": e["id"],
+        "question": e["question"][:80],
+        "answer": e["answer"][:80],
+        "confidence": e.get("confidence", ""),
+        "source": e.get("source", ""),
+        "used_count": e.get("used_count", 0),
+        "updated_at": e.get("updated_at", ""),
+    } for e in entries])
+
+
+@bp.route("/api/knowledge/<int:kid>", methods=["DELETE"])
+def api_knowledge_delete(kid: int):
+    from applypilot.knowledge import delete_knowledge
+    ok = delete_knowledge(kid)
+    return jsonify({"ok": ok})

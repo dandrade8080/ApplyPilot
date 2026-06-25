@@ -18,11 +18,42 @@ from applypilot.apply.form_detector import (
     find_submit_button,
 )
 from applypilot.apply.field_matcher import resolve_label, resolve_yes_no
+from applypilot.apply.metrics import record_apply_result
+from applypilot.apply.ai_apply import apply_with_ai
+from applypilot.alerts import notify_apply_result
 
 logger = logging.getLogger(__name__)
 
 PERSISTENT_PROFILE_DIR = config.APP_DIR / "patchright_profile"
 APPLY_TIMEOUT = 120_000
+
+_heuristic_last_url: str | None = None  # captured before failure for AI fallback
+
+ATS_DOMAIN_MAP = {
+    "linkedin.com": "linkedin",
+    "gupy.io": "gupy",
+    "solides.com.br": "solides",
+    "greenhouse.io": "greenhouse",
+    "lever.co": "lever",
+    "myworkdayjobs.com": "workday",
+    "ashbyhq.com": "ashby",
+    "indeed.com": "indeed",
+    "jobs.recruitee.com": "recruitee",
+    "breezy.hr": "breezy",
+    "icims.com": "icims",
+    "taleo.net": "taleo",
+    "smartrecruiters.com": "smartrecruiters",
+}
+
+
+def _detect_ats_name_from_url(url: str) -> str:
+    """Extract ATS name from a URL domain."""
+    parsed = urllib.parse.urlparse(url)
+    domain = parsed.netloc.lower()
+    for key, name in ATS_DOMAIN_MAP.items():
+        if key in domain:
+            return name
+    return "generic"
 
 
 def safe_evaluate(page, js_code, default=None):
@@ -98,28 +129,89 @@ def launch_browser():
 
 
 def _dismiss_cookie_banners(page):
-    """Try to dismiss common cookie consent banners on external ATS pages."""
-    import re
-    from applypilot.apply.form_detector import find_submit_button
-
-    for selector in [
-        "button:has-text('Accept All Cookies')",
-        "button:has-text('Accept all')",
-        "button:has-text('Accept cookies')",
-        "button:has-text('Allow all')",
-        "button:has-text('Permitir')",
-        "button:has-text('Aceitar')",
-        "button:has-text('OK')",
-        "[class*='cookie'] button",
-        "[id*='cookie'] button",
-    ]:
-        try:
-            btn = page.query_selector(selector)
+    """Try to dismiss common cookie consent banners."""
+    try:
+        for pattern in [
+            'Accept All Cookies', 'Accept all', 'Aceitar todos', 'Aceitar todos os cookies',
+            'Concordar', 'Aceitar', 'Got it', 'Got it!', 'I agree', 'Allow all', 'Allow all cookies'
+        ]:
+            btn = page.query_selector(f"button:has-text('{pattern}')")
             if btn and btn.is_visible():
                 btn.click()
                 page.wait_for_timeout(500)
-        except Exception:
-            pass
+                return
+        js = """
+        () => {
+            const texts = ['accept all', 'aceitar todos', 'aceitar', 'concordar', 'i agree', 'allow all', 'got it'];
+            const els = document.querySelectorAll('button, [role="button"], a');
+            for (const el of els) {
+                const t = ((el.textContent || el.innerText || el.getAttribute('aria-label') || '')).trim().toLowerCase();
+                if (texts.some(p => p === t) && el.offsetWidth > 0 && el.offsetHeight > 0) {
+                    el.click();
+                    return true;
+                }
+            }
+            return false;
+        }"""
+        page.evaluate(js)
+        page.wait_for_timeout(500)
+    except Exception:
+        pass
+
+
+def _dismiss_auth_dialogs(page):
+    """Tenta fechar overlays de autenticação antes de tratar login."""
+    try:
+        page.evaluate(
+            """() => {
+               const candidates = []
+                 .concat(Array.from(document.querySelectorAll('button, [role="button"], [class*="close"], [class*="dismiss"]')));
+               const texts = ['continue', 'fechar', 'close', 'x'];
+               for (const el of candidates) {
+                 if (!el.offsetWidth) continue;
+                 const t = (el.getAttribute('aria-label') || el.textContent || '').trim().toLowerCase();
+                 if (texts.some(s => t.includes(s))) {
+                   el.click();
+                   break;
+                 }
+               }
+             }"""
+        )
+        page.wait_for_timeout(500)
+    except Exception:
+        pass
+
+
+def _wait_auth_frame(page, timeout=4000):
+    """Espera o iframe do LinkedIn aparecer e retorna o elemento ou None."""
+    try:
+        page.wait_for_selector('iframe[src*="linkedin.com"]', timeout=timeout)
+        iframe = page.query_selector('iframe[src*="linkedin.com"]')
+        return iframe
+    except Exception:
+        return None
+
+
+def _handle_sso_job_redirect(page, profile):
+    """Resolve auto-login para portais com SSO do LinkedIn/Localjobs (redirect/LWAccount)."""
+    try:
+        path_suffix = urllib.parse.urlparse(page.url).path.rstrip('/').split('/')[-1].lower()
+        if path_suffix in ('linkedin', 'redirect', 'lwaccount'):
+            frame = _wait_auth_frame(page, timeout=4000)
+            if not frame:
+                return False
+            try:
+                content = page.frame_locator('iframe[src*="linkedin.com"]')
+                locator = content.get_by_text('Entrar com LinkedIn')
+                if locator.count() > 0:
+                    locator.first.click(force=True)
+                    page.wait_for_timeout(8000)
+                    return True
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return False
 
 
 def _dismiss_overlays(page):
@@ -213,16 +305,51 @@ def close_browser(manager, pw, context):
         pass
 
 
+# Variável global para guardar o browser do heuristic para o AI agent reusar
+_heuristic_browser: tuple | None = None
+
 def apply_to_job(job: dict, profile: dict, dry_run: bool = False) -> dict:
-    """Apply to a single job. Uses AI-powered browser automation (browser-use)
-    as primary method, with heuristic fallback for compatibility."""
-    try:
-        from applypilot.apply.ai_apply import apply_with_ai
-        logger.info("AI apply: starting for '%s'", job.get("title", ""))
-        return apply_with_ai(job, profile, dry_run=dry_run)
-    except Exception as ai_err:
-        logger.warning("AI apply failed, falling back to heuristic: %s", ai_err)
-        return _legacy_apply_to_job(job, profile, dry_run=dry_run)
+    """Apply to a single job.
+
+    Prefer the deterministic heuristic engine first. Only fall back to the
+    AI agent if the heuristic flow cannot proceed for the detected form type.
+    """
+    global _heuristic_browser
+    logger.info("Heuristic apply: starting for '%s'", job.get("title", ""))
+
+    result = _legacy_apply_to_job(job, profile, dry_run=dry_run)
+
+    if result.get("status") != "applied":
+        # Fecha o browser do heuristic para liberar o perfil antes do AI agent
+        if _heuristic_browser:
+            try:
+                manager, pw, context = _heuristic_browser
+                close_browser(manager, pw, context)
+            except Exception:
+                pass
+            _heuristic_browser = None
+
+        logger.info("Heuristic engine failed, falling back to AI agent for '%s'", job.get("title", ""))
+        # Pass the heuristic's last URL to the AI agent so it continues from there
+        global _heuristic_last_url
+        _orig_app_url = job.get("application_url")
+        if _heuristic_last_url:
+            logger.info("  Continuing from heuristic URL: %s", _heuristic_last_url[:80])
+            job["application_url"] = _heuristic_last_url
+        try:
+            result = apply_with_ai(job, profile, dry_run=dry_run)
+        except Exception as exc:
+            logger.exception("AI fallback failed for %s", job.get("title", ""))
+            result = {
+                "status": "failed",
+                "error": str(exc)[:100],
+                "duration_ms": result.get("duration_ms", 0),
+                "job_title": job.get("title", ""),
+                "site": job.get("site", "unknown"),
+                "url": job.get("application_url") or job.get("url", ""),
+            }
+
+    return result
 
 
 def _legacy_apply_to_job(job: dict, profile: dict, dry_run: bool = False) -> dict:
@@ -268,6 +395,7 @@ def _legacy_apply_to_job(job: dict, profile: dict, dry_run: bool = False) -> dic
 
     manager, pw, context, page = None, None, None, None
     start = time.time()
+    result = {"status": "failed", "error": "unknown"}
 
     try:
         manager, pw, context, page = launch_browser()
@@ -294,9 +422,9 @@ def _legacy_apply_to_job(job: dict, profile: dict, dry_run: bool = False) -> dic
                 cl_pdf, title, dry_run, llm_client
             )
         elif form_type == "indeed":
-            result = _handle_indeed_apply(
+            result = _handle_generic_apply(
                 page, profile, profile_text, resume_text, pdf_path,
-                cl_pdf, title, dry_run, llm_client
+                cl_pdf, title, form_type, dry_run, llm_client
             )
         else:
             # Generic form handling
@@ -310,12 +438,29 @@ def _legacy_apply_to_job(job: dict, profile: dict, dry_run: bool = False) -> dic
         result["job_title"] = title
         result["site"] = site
         result["url"] = url
+        try:
+            record_apply_result(
+                site=site,
+                form_type=result.get("ats") or result.get("form_type"),
+                status=result.get("status"),
+                error=result.get("error"),
+                extra={"job_title": title},
+            )
+        except Exception:
+            pass
+        # Save current URL for AI agent fallback (to continue from heuristic's page)
+        global _heuristic_last_url
+        if result.get("status") != "applied" and page:
+            try:
+                _heuristic_last_url = page.url
+            except Exception:
+                _heuristic_last_url = None
         return result
 
     except Exception as e:
         elapsed = int((time.time() - start) * 1000)
         logger.exception("Apply failed for %s", title)
-        return {
+        failed = {
             "status": "failed",
             "error": str(e)[:100],
             "duration_ms": elapsed,
@@ -323,11 +468,28 @@ def _legacy_apply_to_job(job: dict, profile: dict, dry_run: bool = False) -> dic
             "site": site,
             "url": url,
         }
+        try:
+            record_apply_result(
+                site=site,
+                form_type=locals().get("form_type"),
+                status="failed",
+                error=str(e)[:100],
+                extra={"job_title": title},
+            )
+        except Exception:
+            pass
+        return failed
     finally:
-        if not dry_run and page:
-            _human_delay( 0.3, 0.8)
-        if manager and pw and context:
-            close_browser(manager, pw, context)
+        global _heuristic_browser
+        if result.get("status") == "applied" or dry_run:
+            if manager and pw and context:
+                close_browser(manager, pw, context)
+            _heuristic_browser = None
+        elif manager and pw and context:
+            # Mant�m o browser aberto para o AI agent poder reusar o perfil
+            # (login do LinkedIn/Gupy etc. fica salvo)
+            _heuristic_browser = (manager, pw, context)
+            logger.info("Browser mantido aberto para fallback do AI agent")
 
 
 def _handle_linkedin_easy_apply(page, profile, profile_text, resume_text,
@@ -336,7 +498,7 @@ def _handle_linkedin_easy_apply(page, profile, profile_text, resume_text,
 
     Supports both Easy Apply (inline modal) and external redirects.
     """
-    from applypilot.apply.form_detector import detect_form_type, find_apply_button
+    from applypilot.apply.form_detector import detect_form_fields, detect_form_type, find_apply_button, wait_for_new_fields
 
     btn = find_apply_button(page)
     if not btn:
@@ -375,10 +537,19 @@ def _handle_linkedin_easy_apply(page, profile, profile_text, resume_text,
         page.goto(direct_url, wait_until="domcontentloaded", timeout=30000)
         page.wait_for_timeout(3000)
 
-        # Dismiss cookie banners if present
+        # Dismiss possible auth dialogs, then cookies
+        _dismiss_auth_dialogs(page)
         _dismiss_cookie_banners(page)
 
-        # Re-detect form type after navigation
+        # Detect real ATS from external URL domain (not hardcoded "linkedin")
+        ext_ats_name = _detect_ats_name_from_url(direct_url)
+        logger.info("External ATS detected: %s", ext_ats_name)
+
+        # Tenta resolver SSO do LinkedIn/Localjobs e/ou login pós-redirect
+        _handle_sso_job_redirect(page, profile)
+        _handle_ats_login(page, profile, ext_ats_name)
+
+        # Re-detect form type after navigation/login
         ext_form_type = detect_form_type(page)
         if ext_form_type == "gupy":
             return _handle_gupy(
@@ -430,10 +601,10 @@ def _handle_linkedin_easy_apply(page, profile, profile_text, resume_text,
 
         if re.search(r"(submit|enviar|concluir|finalizar)", btn_text):
             page.wait_for_timeout(5000)
-            if _verify_submitted(page, "indeed"):
+            if _verify_submitted(page, "linkedin_easy_apply"):
                 return {"status": "applied"}
             page.wait_for_timeout(3000)
-            if _verify_submitted(page, "indeed"):
+            if _verify_submitted(page, "linkedin_easy_apply"):
                 return {"status": "applied"}
             # Could not confirm — but this was the final submit, give benefit of doubt
             # if it was a dry run
@@ -463,7 +634,8 @@ def _find_submit_button(page, container=None):
         broad_btn = page.evaluate("""(sel) => {
             const patterns = [/revisar/i, /review/i, /enviar/i, /submit/i, /concluir/i,
                               /finalizar/i, /avan\u00e7ar/i, /pr\u00f3ximo/i, /continuar/i,
-                              /candidatar/i, /salvar/i, /next/i, /send/i];
+                              /candidatar/i, /salvar/i, /next/i, /send/i,
+                              /entrar/i, /acessar\s*conta/i, /login/i, /sign\s*in/i];
             const els = document.querySelectorAll(sel);
             for (const el of els) {
                 const t = (el.textContent || el.value || '').trim();
@@ -480,7 +652,7 @@ def _find_submit_button(page, container=None):
         else:
             # Last resort: full-page fallback with FINAL submit patterns only (exclude "salvar")
             btn = page.evaluate("""() => {
-                const patterns = [/enviar/i, /submit/i, /concluir/i, /finalizar/i, /candidatar/i, /send/i];
+                const patterns = [/enviar/i, /submit/i, /concluir/i, /finalizar/i, /candidatar/i, /send/i, /entrar/i, /acessar\s*conta/i, /login/i, /sign\s*in/i];
                 const els = document.querySelectorAll('button, a, input[type=submit]');
                 for (const el of els) {
                     const t = (el.textContent || el.value || '').trim();
@@ -544,7 +716,7 @@ def _handle_generic_apply(page, profile, profile_text, resume_text,
         for i, btn in enumerate(apply_btns):
             logger.info("  Try [%d/%d]: '%s' (%s)", i+1, len(apply_btns), btn["text"], btn["tag"])
             href = btn.get("href", "")
-            if btn["tag"] in ("A",) and href and href != "#" and not href.startswith("#"):
+            if btn["tag"] in ("A",) and href and href != "#" and not href.startswith("#") and not href.startswith("javascript:"):
                 base = page.url
                 full_url = urllib.parse.urljoin(base, href)
                 logger.info("  Navigating via href: %s", full_url[:80])
@@ -568,6 +740,7 @@ def _handle_generic_apply(page, profile, profile_text, resume_text,
     fields = _detect(page) if not locals().get('fields') else fields
     steps = 0
     consecutive_empty_fills = 0
+    seen_urls = set()
     while steps < 15:
         if steps > 0 and not locals().get('skip_wait_fields'):
             fields = _wait_fields(page, timeout=8, prev=previous_count)
@@ -594,6 +767,25 @@ def _handle_generic_apply(page, profile, profile_text, resume_text,
             radio_groups[key].append(f)
         logger.info("  Radio groups: %d (%s)", len(radio_groups), list(radio_groups.keys())[:3])
 
+        # Handle hidden file inputs (e.g., Gupy curriculum page)
+        hidden_file = page.query_selector("input[type='file']")
+        if hidden_file:
+            try:
+                already_uploaded = page.evaluate("""(el) => !!el.files?.length""", hidden_file)
+                if not already_uploaded:
+                    if pdf_path:
+                        hidden_file.set_input_files(pdf_path)
+                        logger.info("  Uploaded resume via hidden file input: %s", Path(pdf_path).name)
+                        filled_any = True
+                        page.wait_for_timeout(2000)
+                    elif cl_pdf:
+                        hidden_file.set_input_files(cl_pdf)
+                        logger.info("  Uploaded cover letter via hidden file input: %s", Path(cl_pdf).name)
+                        filled_any = True
+                        page.wait_for_timeout(2000)
+            except Exception as e:
+                logger.debug("  Hidden file upload failed: %s", e)
+
         for f in fields:
             if f.get("type") in ("hidden", "submit") or not f.get("visible"):
                 continue
@@ -609,6 +801,15 @@ def _handle_generic_apply(page, profile, profile_text, resume_text,
 
             label = (f.get("label") or f.get("placeholder") or f.get("name") or "").strip()
             if not label:
+                continue
+
+            # Skip password fields — handled by _handle_ats_login or manual login
+            if f.get("type") == "password":
+                pw = profile.get("personal", {}).get("password") or profile.get("personal", {}).get("password_fallback")
+                if pw:
+                    logger.info("    password field: using stored credentials")
+                    _fill_field(page, f, pw)
+                    filled_any = True
                 continue
 
             resolved = resolve_label(label, profile)
@@ -650,20 +851,32 @@ def _handle_generic_apply(page, profile, profile_text, resume_text,
                     continue
                 yes_no = resolve_yes_no(glabel)
                 logger.info("  Radio group '%s': resolve_yes_no=%s", glabel[:40], yes_no)
-                if not yes_no:
-                    continue
-                target_val = "yes" if yes_no.lower() in ("yes", "sim", "y") else "no"
                 handled = False
-                for r in radios:
-                    if r.get("value", "").lower() == target_val:
-                        if r.get("checked"):
-                            handled = True  # Already correctly answered
-                        else:
-                            _fill_field(page, r, yes_no)
-                            filled_any = True
-                            handled = True
-                            logger.info("Radio group '%s': selected '%s' (→%s)", glabel[:40], target_val, yes_no)
-                        break
+                if yes_no:
+                    target_val = "yes" if yes_no.lower() in ("yes", "sim", "y") else "no"
+                    for r in radios:
+                        if r.get("value", "").lower() == target_val:
+                            if r.get("checked"):
+                                handled = True
+                            else:
+                                _fill_field(page, r, yes_no)
+                                filled_any = True
+                                handled = True
+                                logger.info("Radio group '%s': selected '%s' (→%s)", glabel[:40], target_val, yes_no)
+                            break
+                if not handled:
+                    # Try resolve_label for non-boolean radio groups (e.g. marital status)
+                    resolved = resolve_label(glabel, profile)
+                    if resolved and resolved.get("type") == "text":
+                        profile_val = resolved["value"].strip().lower()
+                        for r in radios:
+                            rlabel = (r.get("label") or "").strip().lower()
+                            if rlabel == profile_val or rlabel.startswith(profile_val) or profile_val.startswith(rlabel):
+                                _fill_field(page, r, resolved["value"])
+                                filled_any = True
+                                handled = True
+                                logger.info("Radio group '%s': label-matched '%s' (→%s)", glabel[:40], rlabel, profile_val)
+                                break
                 if handled:
                     filled_any = True
 
@@ -719,6 +932,12 @@ def _handle_generic_apply(page, profile, profile_text, resume_text,
             logger.info("  After %s: %d visible fields (of %d total)", btn_text[:20], len(visible_after), len(more_fields))
             for vf in visible_after:
                 logger.info("    field: type=%s name='%s' label='%s' value='%s'", vf.get("type"), vf.get("name",""), vf.get("label",""), vf.get("value","")[:20])
+            # Dedup check: if same URL repeats after submit, break to avoid infinite loop
+            after_url = page.url
+            if after_url in seen_urls:
+                logger.info("  Same URL after submit (loop detected), giving up")
+                break
+            seen_urls.add(after_url)
             if not visible_after:
                 # Wait a bit more and check for success confirmation
                 page.wait_for_timeout(3000)
@@ -728,6 +947,129 @@ def _handle_generic_apply(page, profile, profile_text, resume_text,
                 after_url = page.url[:90]
                 after_text_len = page.evaluate("document.body.innerText.length")
                 logger.info("  Page after step: url=%s (body=%d chars)", after_url, after_text_len)
+                # Handle Gupy curriculum page: check for "Responder agora", upload CV, then continue
+                if form_type == "gupy" and "/curriculum" in after_url:
+                    logger.info("  Gupy curriculum page detected – checking for 'Responder agora'...")
+                    try:
+                        # Try clicking "Responder agora" to reveal hidden form fields
+                        responder = page.query_selector("button:has-text('Responder agora')")
+                        if responder:
+                            logger.info("  Found 'Responder agora' button – clicking to reveal fields...")
+                            responder.click()
+                            _human_delay(2.0, 4.0)
+                            page.wait_for_timeout(3000)
+                            new_fields = _detect(page)
+                            new_visible = [f for f in new_fields if f.get("visible") and f["type"] not in ("hidden", "submit")]
+                            if new_visible:
+                                logger.info("  %d fields revealed by 'Responder agora'", len(new_visible))
+                                fields = new_fields
+                                skip_wait_fields = True
+                                steps += 1
+                                continue
+                    except Exception as e:
+                        logger.info("  'Responder agora' handler: %s", e)
+
+                    try:
+                        logger.info("  Uploading CV...")
+                        # Debug: dump all interactive elements on the page
+                        try:
+                            page_html = page.content()
+                            logger.info("  HTML: %d chars, file input in source: %s",
+                                        len(page_html), "type=file" in page_html)
+                            all_els = page.evaluate("""() => {
+                                const els = [];
+                                document.querySelectorAll('button, a[href], input, select, textarea, [role="button"], [tabindex]:not([tabindex="-1"])').forEach(el => {
+                                    const rect = el.getBoundingClientRect();
+                                    els.push({
+                                        tag: el.tagName,
+                                        type: el.type || '',
+                                        text: (el.textContent || '').trim().slice(0, 40),
+                                        placeholder: el.placeholder || '',
+                                        visible: rect.width > 0 && rect.height > 0,
+                                        rect: `${rect.width.toFixed(0)}x${rect.height.toFixed(0)}`
+                                    });
+                                });
+                                return JSON.stringify(els.slice(0, 30));
+                            }""")
+                            logger.info("  Interactive elements: %s", all_els)
+                        except Exception as e:
+                            logger.info("  Debug dump failed: %s", e)
+                        # Strategy 1: try upload via standard file input
+                        file_uploaded = False
+                        for _w in range(8):
+                            file_input = page.query_selector("input[type='file']")
+                            if file_input and pdf_path:
+                                file_input.set_input_files(pdf_path)
+                                file_uploaded = True
+                                logger.info("  Uploaded via input[type=file]: %s", Path(pdf_path).name)
+                                break
+                            page.wait_for_timeout(1000)
+                        if not file_uploaded and pdf_path:
+                            logger.info("  No input[type=file] – trying file chooser...")
+                            try:
+                                with page.expect_file_chooser(timeout=15000) as fc_info:
+                                    clicked = page.evaluate("""() => {
+                                        const patterns = [/selecionar/i, /anexar/i, /upload/i, /curriculo/i, /resume/i, /choose/i, /browse/i, /select.*arquivo/i, /selecionar.*arquivo/i];
+                                        const all = document.querySelectorAll('button, a, [role="button"], [class*="button"], label');
+                                        for (const el of all) {
+                                            const t = (el.textContent || '').trim().toLowerCase();
+                                            if (t && patterns.some(p => p.test(t)) && el.offsetWidth > 0 && el.offsetHeight > 0) {
+                                                el.click();
+                                                return true;
+                                            }
+                                        }
+                                        return false;
+                                    }""")
+                                    if clicked:
+                                        fc = fc_info.value
+                                        fc.set_files(pdf_path)
+                                        file_uploaded = True
+                                        logger.info("  Uploaded via file chooser: %s", Path(pdf_path).name)
+                            except Exception as e:
+                                logger.info("  File chooser failed: %s", e)
+                        if file_uploaded:
+                            page.wait_for_timeout(3000)
+                            post_fields = _detect(page)
+                            post_visible = [f for f in post_fields if f.get("visible") and f["type"] not in ("hidden", "submit")]
+                            if post_visible:
+                                logger.info("  %d new fields after upload", len(post_visible))
+                                fields = post_fields
+                                skip_wait_fields = True
+                                previous_count = 0
+                                submit_btn = _find_submit(page)
+                                if submit_btn:
+                                    _human_click(page, submit_btn["x"], submit_btn["y"])
+                                    _human_delay(1.0, 3.0)
+                                    page.wait_for_timeout(5000)
+                                    if _verify_submitted(page, form_type):
+                                        return {"status": "applied"}
+                                    page.wait_for_timeout(3000)
+                                    if _verify_submitted(page, form_type):
+                                        return {"status": "applied"}
+                                continue
+                            sub_btn = _find_submit(page)
+                            if sub_btn:
+                                logger.info("  Continue after upload: '%s'", (sub_btn.get("text") or "")[:30])
+                                _human_click(page, sub_btn["x"], sub_btn["y"])
+                                _human_delay(1.0, 3.0)
+                                page.wait_for_timeout(5000)
+                                if _verify_submitted(page, form_type):
+                                    return {"status": "applied"}
+                                page.wait_for_timeout(3000)
+                                if _verify_submitted(page, form_type):
+                                    return {"status": "applied"}
+                        else:
+                            logger.info("  Cannot upload CV – clicking continue anyway")
+                            sub_btn = _find_submit(page)
+                            if sub_btn:
+                                logger.info("  Click '%s' without CV", (sub_btn.get("text") or "")[:30])
+                                _human_click(page, sub_btn["x"], sub_btn["y"])
+                                _human_delay(1.0, 3.0)
+                                page.wait_for_timeout(5000)
+                                if _verify_submitted(page, form_type):
+                                    return {"status": "applied"}
+                    except Exception as e:
+                        logger.info("  Gupy curriculum upload failed: %s", e)
                 # No fields — might be on review page with only a submit button
                 # Poll for submit button in case the review page is still loading
                 sub_btn = None
@@ -916,17 +1258,31 @@ def _handle_ats_login(page, profile, ats_name: str) -> bool:
                     logger.info("Auto-login to %s successful", ats_name)
                     return True
 
-    logger.info("Waiting for manual login to %s (you have 120s)...", ats_name)
-    for _ in range(60):
+    logger.info("Waiting for manual login to %s (you have 300s)...", ats_name)
+    try:
+        from applypilot.alerts import send_telegram_message
+        send_telegram_message(
+            "🚨 <b>ApplyPilot - Login Necessario</b>\n"
+            f"Auto-login falhou para <b>{ats_name}</b>.\n"
+            f"URL: {page.url[:80]}\n\n"
+            "Fac,ca login manualmente no Chrome aberto. "
+            "O processo continuara automaticamente apos o login."
+        )
+    except Exception:
+        pass
+    for _ in range(150):
         page.wait_for_timeout(2000)
         url_now = page.url.lower()
         if "signin" not in url_now and "signup" not in url_now:
             logger.info("Manual login detected for %s", ats_name)
             return True
-        page_text_now = page.evaluate("document.body.innerText.substring(0, 500)").lower()
-        if "entrar" not in page_text_now and "acessar conta" not in page_text_now[:50]:
-            logger.info("Manual login detected for %s (page changed)", ats_name)
-            return True
+        try:
+            page_text_now = page.evaluate("(document.body?.innerText || '').substring(0, 500)").lower()
+            if "entrar" not in page_text_now and "acessar conta" not in page_text_now[:50]:
+                logger.info("Manual login detected for %s (page changed)", ats_name)
+                return True
+        except Exception:
+            pass
 
     logger.warning("Login to %s failed or timed out", ats_name)
     return False
@@ -973,11 +1329,8 @@ def _fill_field(page, field: dict, value: str):
             _fill_field_by_label(page, field, value)
             return
 
-        # Text-like fields: standard fill first
-        try:
-            _human_clear_and_type(page, selector, value)
-        except Exception:
-            # Fallback: JavaScript-based fill for React
+        # Text-like fields: try standard fill first, fallback to JS
+        if not _human_clear_and_type(page, selector, value):
             _fill_react_field(page, selector, value)
     except Exception as e:
         logger.debug("Failed to fill %s: %s", field.get("name", ""), e)
@@ -1055,9 +1408,11 @@ def _fill_react_field(page, selector: str, value: str):
     """Fill a field using JavaScript evaluation to trigger React synthetic events."""
     import json
     safe_value = json.dumps(value)
+    # Escape single quotes in selector for JS string
+    js_selector = selector.replace("\\", "\\\\").replace("'", "\\'")
     is_contenteditable = page.evaluate(
         f"""() => {{
-            const el = document.querySelector('{selector}');
+            const el = document.querySelector('{js_selector}');
             if (!el) return 'not_found';
             if (el.getAttribute('contenteditable') === 'true') return 'contenteditable';
             return 'input';
@@ -1068,7 +1423,7 @@ def _fill_react_field(page, selector: str, value: str):
     if is_contenteditable == 'contenteditable':
         page.evaluate(
             f"""() => {{
-                const el = document.querySelector('{selector}');
+                const el = document.querySelector('{js_selector}');
                 el.focus();
                 document.execCommand('selectAll', false, null);
                 document.execCommand('insertText', false, {safe_value});
@@ -1079,7 +1434,7 @@ def _fill_react_field(page, selector: str, value: str):
     else:
         page.evaluate(
             f"""() => {{
-                const el = document.querySelector('{selector}');
+                const el = document.querySelector('{js_selector}');
                 if (!el) return;
                 const nativeSetter = Object.getOwnPropertyDescriptor(
                     window.HTMLInputElement.prototype, 'value'
@@ -1114,12 +1469,14 @@ def _upload_file(page, field: dict, file_path: str):
 def _build_selector(field: dict) -> str | None:
     """Build a CSS selector for a form field."""
     if field.get("id"):
-        return f"#{field['id']}"
+        fid = field["id"].replace("\\", "\\\\").replace("'", "\\'")
+        return f"[id='{fid}']"
     if field.get("name"):
-        return f"[name='{field['name']}']"
+        fname = field["name"].replace("\\", "\\\\").replace("'", "\\'")
+        return f"[name='{fname}']"
     label = (field.get("label") or field.get("aria-label") or "").strip()
     if label:
-        safe = label.replace("'", "\\'")
+        safe = label.replace("\\", "\\\\").replace("'", "\\'")
         return f"[aria-label='{safe}'], [placeholder='{safe}']"
     return None
 
@@ -1134,16 +1491,17 @@ def _human_click(page, x: float, y: float):
         pass
 
 
-def _human_clear_and_type(page, selector: str, text: str):
-    """Type text with human-like timing."""
+def _human_clear_and_type(page, selector: str, text: str) -> bool:
+    """Type text with human-like timing. Returns True if successful."""
     try:
-        page.click(selector)
+        page.click(selector, timeout=500)
         _human_delay( 0.1, 0.3)
-        page.fill(selector, "")
+        page.fill(selector, "", timeout=500)
         _human_delay( 0.05, 0.15)
-        page.type(selector, str(text), delay=_jitter(40, 120))
+        page.type(selector, str(text), delay=_jitter(40, 120), timeout=2000)
+        return True
     except Exception:
-        pass
+        return False
 
 
 def _human_delay(min_s: float = 0.3, max_s: float = 1.0):

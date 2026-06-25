@@ -1,112 +1,114 @@
 # ApplyPilot search configuration
-# Copy to ~/.applypilot/searches.yaml and customize for your job search.
-# The wizard (applypilot init) generates a basic version automatically.
+# Customizado para Daniel Andrade — Marketing
 
-# Search queries -- each has a query string and priority tier.
-# Tier 1: High-priority exact matches (searched first, highest precision)
-# Tier 2: Strong matches, broader scope
-# Tier 3: Wide net, high volume, lower precision
 queries:
-  - query: "software engineer"
+  - query: "Head de Marketing"
     tier: 1
-  - query: "backend engineer"
+  - query: "Head of Marketing"
     tier: 1
-  - query: "backend developer"
+  - query: "Gerente de Marketing"
     tier: 1
-  - query: "full stack developer"
-    tier: 2
-  - query: "full stack engineer"
-    tier: 2
-  - query: "python developer"
-    tier: 2
-  - query: "python engineer"
-    tier: 2
-  - query: "DevOps engineer"
-    tier: 2
-  - query: "site reliability engineer"
-    tier: 2
-  - query: "platform engineer"
-    tier: 2
-  - query: "cloud engineer"
-    tier: 2
-  - query: "data engineer"
-    tier: 2
-  - query: "infrastructure engineer"
-    tier: 2
-  - query: "software developer"
-    tier: 3
-  - query: "developer"
-    tier: 3
-  - query: "systems engineer"
-    tier: 3
-  - query: "automation engineer"
-    tier: 3
-  - query: "solutions engineer"
-    tier: 3
-  - query: "integration engineer"
-    tier: 3
-  - query: "ML engineer"
-    tier: 3
-  - query: "machine learning engineer"
-    tier: 3
-  - query: "AI engineer"
-    tier: 3
-  - query: "security engineer"
-    tier: 3
+  - query: "Diretor de Marketing"
+    tier: 1
+  - query: "Marketing Manager"
+    tier: 1
+  - query: "Marketing Director"
+    tier: 1
 
-# Locations to search
 locations:
-  - location: "San Francisco, CA"
+  - location: "São Paulo"
     remote: false
-  - location: "Remote"
-    remote: true
+  - location: "Brasil"
+    remote: false
 
-# Location filtering -- accept/reject patterns for job location text
-location:
-  accept_patterns:
-    - "San Francisco"
-    - "Bay Area"
-    - "SF"
-    - "California"
-    - "CA"
-    - "Remote"
-    - "Anywhere"
-    - "United States"
-    - "US"
-    - "USA"
-  reject_patterns:
-    - "New York only"
-    - "Seattle only"
-    - "onsite only"
-    - "London, UK"
-    - "India"
-    - "Philippines"
+location_accept:
+  - "Brasil"
+  - "Brazil"
+  - "São Paulo"
+  - "SP"
+  - "Grande São Paulo"
+  - "ABC"
+  - "Osasco"
+  - "Guarulhos"
+  - "Santo André"
+  - "São Bernardo"
+  - "São Caetano"
+  - "Diadema"
+  - "Mauá"
+  - "Taboão"
+  - "Embu"
+  - "Barueri"
+  - "Santana de Parnaíba"
+  - "Carapicuíba"
+  - "Cotia"
+  - "Jandira"
+  - "Itapevi"
+  - "Itapecerica"
+  - "Franco da Rocha"
+  - "Cajamar"
+  - "Caieiras"
+  - "Mairiporã"
+  - "Arujá"
+  - "Mogi das Cruzes"
+  - "Suzano"
+  - "Ferraz de Vasconcelos"
+  - "Poá"
+  - "Itaquaquecetuba"
+  - "Santos"
+  - "Campinas"
+  - "São José dos Campos"
+  - "Remoto"
+  - "Home Office"
+  - "Híbrido"
+  - "Hibrido"
 
-# Country for Indeed/LinkedIn/Google Jobs searches
-country: "USA"
 
-# JobSpy source boards (all available options shown)
-boards:
-  - indeed
+location_reject_non_remote:
+  - "United States"
+  - "US"
+  - "USA"
+  - "New York"
+  - "California"
+  - "San Francisco"
+  - "London"
+  - "India"
+  - "Canada"
+  - "Germany"
+  - "Portugal"
+  - "Europe"
+  - "Australia"
+
+country: "BRA"
+
+glassdoor_location_map:
+  "São Paulo": "Sao Paulo"
+
+sites:
   - linkedin
-  - glassdoor
-  - zip_recruiter
-  - google
+  - indeed
 
-# Search defaults
 defaults:
-  results_per_site: 100  # Max results per board per query
-  hours_old: 72          # Only jobs posted within this many hours
+  results_per_site: 30
+  hours_old: 24
+  country_indeed: "brazil"
 
-# Negative keywords -- skip jobs with these in the title (case-insensitive)
 exclude_titles:
-  - "senior director"
-  - "VP "
-  - "vice president"
-  - "chief"
   - "intern"
   - "internship"
-  - "co-op"
-  - "clearance required"
-  - "TS/SCI"
-  - "principal scientist"
+  - "estágio"
+  - "trainee"
+  - "junior"
+  - "assistant"
+  - "auxiliar"
+  - "Jovem Aprendiz"
+  - "analista"
+  - "especialista"
+  - "supervisor"
+  - "pleno"
+  - "estagiário"
+  - "growth"
+  - "consultor"
+  - "consultora"
+  - "coordenador"
+  - "coordenadora"
+  - "coordinator"

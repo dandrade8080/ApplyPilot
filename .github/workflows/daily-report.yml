@@ -1,0 +1,120 @@
+name: "Daily Report"
+
+on:
+  schedule:
+    - cron: "30 11 * * *"   # 08:30 BRT = 11:30 UTC
+  workflow_dispatch:          # manual trigger for testing
+
+jobs:
+  daily-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install core dependencies (no browser, no GUI)
+        run: |
+          pip install typer rich httpx beautifulsoup4 python-dotenv pyyaml pandas requests langchain-openai
+
+      - name: Install python-jobspy
+        run: |
+          pip install --no-deps python-jobspy
+          pip install pydantic tls-client markdownify regex
+
+      - name: Create config directory
+        run: |
+          mkdir -p /tmp/applypilot
+
+      - name: Create profile (minimal, for scoring)
+        run: |
+          cat > /tmp/applypilot/profile.json << 'PROFILE'
+          {
+            "personal": {
+              "full_name": "Daniel Andrade",
+              "email": "dandrade80@gmail.com",
+              "phone": "(11) 95579-9633",
+              "city": "São Paulo",
+              "province_state": "SP",
+              "country": "Brasil",
+              "linkedin_url": "https://www.linkedin.com/in/danielandrademkt"
+            },
+            "work_authorization": {
+              "legally_authorized_to_work": "Yes",
+              "require_sponsorship": "No",
+              "work_permit_type": "Citizen"
+            },
+            "experience": {
+              "years_of_experience_total": "20",
+              "current_job_title": "Co-Founder & Board Member - Marketing",
+              "target_role": "Head / Director / Gerente de Marketing"
+            },
+            "resume_facts": {
+              "preserved_companies": ["Stellantis", "New Holland", "CNH Industrial"],
+              "preserved_projects": ["Mopar", "Odette.IA"],
+              "preserved_school": "SDA Bocconi",
+              "real_metrics": ["20 anos experiencia marketing", "LatAm region", "MBA Executivo"]
+            },
+            "skills_boundary": {
+              "tools": ["Portugues Nativo", "Ingles Fluente", "Italiano Fluente"],
+              "languages": []
+            }
+          }
+          PROFILE
+
+      - name: Create resume.txt
+        run: |
+          cat > /tmp/applypilot/resume.txt << 'RESUME'
+          Daniel Andrade - Marketing Executive (20+ anos de experiencia)
+
+          RESUMO PROFISSIONAL
+          Executivo de Marketing com mais de 20 anos de experiencia em lideranca estrategica,
+          branding, marketing digital e comunicacao integrada. MBA Executivo pela SDA Bocconi.
+          Atuacao em multinacionais como Stellantis, CNH Industrial e New Holland, liderando
+          equipes e projetos de grande escala na America Latina.
+
+          EXPERIENCIA PROFISSIONAL
+          Co-Founder & Board Member - Marketing | Gonjoi (2023-presente)
+          - Estrategia de branding e marketing digital para startups
+          - Desenvolvimento de projetos de IA aplicada ao marketing com Odette.IA
+
+          Stellantis | LatAm Marketing Manager (2018-2023)
+          - Estrategia de comunicacao e branding da Mopar em toda America Latina
+          - Lideranca de equipe multicultural com reporte direto ao VP regional
+
+          New Holland / CNH Industrial | Marketing Coordinator (2010-2018)
+          - Marketing estrategico para linha de produtos agricolas no Brasil
+
+          FORMACAO
+          MBA Executivo - SDA Bocconi (Italia)
+          Graduacao em Marketing / Comunicacao Social
+
+          IDIOMAS
+          Portugues: Nativo | Ingles: Fluente | Italiano: Fluente
+
+          COMPETENCIAS
+          Branding, Marketing Digital, Marketing Estrategico, Lideranca de Equipes,
+          Comunicacao Integrada, Inteligencia Artificial aplicada ao Marketing,
+          Planejamento de Marketing, Trade Marketing, CRM, E-commerce
+          RESUME
+
+      - name: Create .env
+        run: |
+          cat > /tmp/applypilot/.env << 'ENV'
+          DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
+          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}
+          ENV
+
+      - name: Run daily report
+        env:
+          APPLYPILOT_DIR: /tmp/applypilot
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          python -m applypilot.cli daily-report --hours 24 --top 15

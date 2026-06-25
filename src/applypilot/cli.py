@@ -9,7 +9,10 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from applypilot import __version__
+try:
+    from applypilot import __version__
+except Exception:
+    __version__ = "dev"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -74,8 +77,42 @@ def init() -> None:
 
 
 @app.command()
+def discover(
+    preset: str | None = typer.Option(None, "--preset", help="Named filter preset from searches.yaml"),
+    hours_old: int | None = typer.Option(None, "--hours-old", help="Restrict to jobs younger than N hours"),
+    results_per_site: int | None = typer.Option(None, "--results-per-site", help="Max results per site"),
+    remote: bool | None = typer.Option(None, "--remote", help="Force remote-only search"),
+    selected: str | None = typer.Option(None, "--selected", help="Comma-separated selected search labels"),
+) -> None:
+    """Run job discovery with optional filter presets."""
+    _bootstrap()
+
+    from applypilot.config import load_search_config
+    from applypilot.discovery.jobspy import run_discovery
+
+    cfg = load_search_config() or {}
+    overrides: dict = {}
+    if hours_old is not None:
+        defaults = cfg.setdefault("defaults", {})
+        defaults["hours_old"] = hours_old
+        overrides["hours_old"] = hours_old
+    if results_per_site is not None:
+        defaults = cfg.setdefault("defaults", {})
+        defaults["results_per_site"] = results_per_site
+        overrides["results_per_site"] = results_per_site
+    if remote is not None:
+        cfg["remote_default"] = remote
+        overrides["remote"] = remote
+    if selected:
+        cfg["selected"] = [s.strip() for s in selected.split(",") if s.strip()]
+
+    result = run_discovery(cfg=cfg, filter_preset=preset, filter_overrides=overrides or None)
+    console.print(f"\n[green]Discovery complete:[/green] {result}")
+
+
+@app.command()
 def run(
-    stages: Optional[list[str]] = typer.Argument(
+    stages: list[str] | None = typer.Argument(
         None,
         help=(
             "Pipeline stages to run. "
@@ -151,7 +188,7 @@ def apply(
     continuous: bool = typer.Option(False, "--continuous", "-c", help="Run forever, polling for new jobs."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview actions without submitting."),
     headless: bool = typer.Option(False, "--headless", help="Run browsers in headless mode."),
-    provider: str = typer.Option("patchright", "--provider", help="Agent provider: 'patchright', 'deepseek', or 'claude'."),
+    provider: str = typer.Option("patchright", "--provider", help="Agent provider: 'patchright', 'deepseek', 'claude', or 'browser-use'."),
     url: Optional[str] = typer.Option(None, "--url", help="Apply to a specific job URL."),
     gen: bool = typer.Option(False, "--gen", help="Generate prompt file for manual debugging instead of running."),
     mark_applied: Optional[str] = typer.Option(None, "--mark-applied", help="Manually mark a job URL as applied."),
@@ -205,7 +242,7 @@ def apply(
     if not (gen and url):
         conn = get_connection()
         ready = conn.execute(
-            "SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL AND applied_at IS NULL"
+            "SELECT COUNT(*) FROM jobs WHERE tailored_resume_path IS NOT NULL AND (apply_status IS NULL OR apply_status != 'applied')"
         ).fetchone()[0]
         if ready == 0:
             console.print(
@@ -477,6 +514,316 @@ def doctor() -> None:
         console.print("[dim]  -> Tier 3 unlocks: auto-apply (needs Claude Code CLI + Chrome + Node.js)[/dim]")
 
     console.print()
+
+
+# ---------------------------------------------------------------------------
+# Knowledge base management
+# ---------------------------------------------------------------------------
+
+@app.command()
+def knowledge(
+    query: Optional[str] = typer.Argument(None, help="Search term to filter knowledge entries."),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max entries to show."),
+    delete: Optional[int] = typer.Option(None, "--delete", help="Delete a knowledge entry by ID."),
+) -> None:
+    """View and manage the knowledge base."""
+    _bootstrap()
+    from applypilot.knowledge import get_all_knowledge, search_knowledge, delete_knowledge
+
+    if delete is not None:
+        ok = delete_knowledge(delete)
+        if ok:
+            console.print(f"[green]Deleted knowledge entry #{delete}[/green]")
+        else:
+            console.print(f"[red]Entry #{delete} not found.[/red]")
+        return
+
+    if query:
+        entries = search_knowledge(query, limit=limit)
+    else:
+        entries = get_all_knowledge(limit=limit)
+
+    if not entries:
+        console.print("[yellow]No knowledge entries found.[/yellow]")
+        return
+
+    table = Table(title=f"Knowledge Base ({len(entries)} entries)")
+    table.add_column("ID", style="dim", width=4)
+    table.add_column("Question", width=40)
+    table.add_column("Answer", width=40)
+    table.add_column("Conf", width=5)
+    table.add_column("Source", width=10)
+    table.add_column("Used", width=5)
+
+    for e in entries:
+        table.add_row(
+            str(e["id"]),
+            e["question"][:38],
+            e["answer"][:38],
+            str(e.get("confidence", "")),
+            str(e.get("source", "")),
+            str(e.get("used_count", 0)),
+        )
+    console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# Alerts management
+# ---------------------------------------------------------------------------
+
+@app.command()
+def alerts() -> None:
+    """List pending alerts waiting for user response."""
+    _bootstrap()
+    from applypilot.alerts import get_pending_alerts
+
+    pending = get_pending_alerts() or []
+    if not pending:
+        console.print("[green]No pending alerts.[/green]")
+        return
+
+    table = Table(title=f"Pending Alerts ({len(pending)})")
+    table.add_column("ID", width=4)
+    table.add_column("Question", width=50)
+    table.add_column("Status", width=10)
+    table.add_column("Job", width=30)
+    for a in pending:
+        table.add_row(
+            str(a["id"]),
+            (a.get("question") or a.get("field_label", ""))[:48],
+            a.get("status", ""),
+            (a.get("job_title", "") or "")[:28],
+        )
+    console.print(table)
+
+
+@app.command()
+def answer(
+    alert_id: int = typer.Argument(..., help="Alert ID to answer."),
+    answer_text: str = typer.Argument(..., help="Your answer text."),
+) -> None:
+    """Answer a pending alert from the CLI."""
+    _bootstrap()
+    from applypilot.alerts import answer_alert as _answer_alert
+    from applypilot.apply.apply_agent import signal_alert_answered
+
+    ok = _answer_alert(alert_id, answer_text)
+    if ok:
+        signal_alert_answered(alert_id)
+        console.print(f"[green]Alert #{alert_id} answered: '{answer_text[:60]}'[/green]")
+    else:
+        console.print(f"[red]Alert #{alert_id} not found or already answered.[/red]")
+
+
+# ---------------------------------------------------------------------------
+# Telegram listener (polling mode)
+# ---------------------------------------------------------------------------
+
+@app.command()
+def telegram(
+    poll: bool = typer.Option(False, "--poll", "-p", help="Start polling for Telegram updates."),
+) -> None:
+    """Interact with Telegram bot — poll for /answer commands."""
+    _bootstrap()
+    if not poll:
+        console.print("[yellow]Use --poll to start polling for Telegram updates.[/yellow]")
+        return
+
+    from applypilot.alerts import get_pending_alerts, send_telegram_message
+    import requests
+
+    config.load_env()
+    import os
+
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    if not token:
+        console.print("[red]TELEGRAM_BOT_TOKEN not set in .env[/red]")
+        raise typer.Exit(1)
+
+    offset = 0
+    console.print("[green]Polling Telegram for /answer commands... (Ctrl+C to stop)[/green]")
+
+    try:
+        while True:
+            url = f"https://api.telegram.org/bot{token}/getUpdates"
+            resp = requests.get(url, params={
+                "offset": offset,
+                "timeout": 30,
+            }, timeout=35)
+            data = resp.json()
+            if not data.get("ok"):
+                time.sleep(5)
+                continue
+
+            for update in data.get("result", []):
+                offset = update["update_id"] + 1
+                msg = update.get("message", {}) or update.get("edited_message", {})
+                text = (msg.get("text") or "").strip()
+                chat_id = str(msg.get("chat", {}).get("id", ""))
+                if not text or not chat_id:
+                    continue
+                if text.startswith("/answer"):
+                    parts = text.split(maxsplit=2)
+                    if len(parts) >= 3:
+                        try:
+                            aid = int(parts[1])
+                            ans = parts[2]
+                            from applypilot.alerts import answer_alert
+                            if answer_alert(aid, ans):
+                                signal_alert_answered(aid)
+                                send_telegram_message(
+                                    f"✅ Resposta salva para alerta #{aid}.",
+                                    chat_id=chat_id,
+                                )
+                                console.print(f"[green]Alert #{aid} answered via Telegram: '{ans[:50]}'[/green]")
+                            else:
+                                send_telegram_message(
+                                    f"Alerta #{aid} nao encontrado.",
+                                    chat_id=chat_id,
+                                )
+                        except (ValueError, IndexError):
+                            send_telegram_message(
+                                "Formato: /answer <id> <texto>",
+                                chat_id=chat_id,
+                            )
+                elif text == "/status":
+                    pending = get_pending_alerts()
+                    if pending:
+                        msg_lines = [f"Alertas pendentes ({len(pending)}):"]
+                        for a in pending[:5]:
+                            msg_lines.append(f"  #{a['id']}: {a.get('question','')[:60]}")
+                        send_telegram_message("\n".join(msg_lines), chat_id=chat_id)
+                    else:
+                        send_telegram_message("Nenhum alerta pendente.", chat_id=chat_id)
+                elif text == "/help":
+                    send_telegram_message(
+                        "Comandos:\n"
+                        "/answer <id> <texto> - Responder alerta\n"
+                        "/status - Ver alertas pendentes\n"
+                        "/help - Esta mensagem",
+                        chat_id=chat_id,
+                    )
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Telegram polling stopped.[/yellow]")
+
+
+@app.command()
+def daily_report(
+    hours: int = typer.Option(24, "--hours", "-h", help="Hours back to search (default: 24 = yesterday)."),
+    top: int = typer.Option(15, "--top", "-t", help="Max jobs to include in Telegram message."),
+    no_telegram: bool = typer.Option(False, "--no-telegram", help="Skip Telegram send, only save local report."),
+) -> None:
+    """Discover + score jobs from the last N hours and send a Telegram report."""
+    from datetime import datetime, timedelta
+    import os
+
+    _bootstrap()
+
+    from applypilot.config import load_search_config, APP_DIR
+    cfg = load_search_config() or {}
+    cfg.setdefault("defaults", {})["hours_old"] = hours
+
+    from applypilot.discovery.jobspy import run_discovery
+    from applypilot.scoring.scorer import run_scoring
+    from applypilot.database import get_connection
+    from applypilot.alerts import send_telegram_message
+
+    cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+
+    console.print(f"\n[bold blue]Daily Report[/bold blue] — buscando vagas das ultimas {hours}h")
+    console.print()
+
+    console.print("[cyan]Stage 1/2: Discovery...[/cyan]")
+    result = run_discovery(cfg=cfg)
+    console.print(f"  New: {result['new']} | Dupes: {result['existing']} | Errors: {result['errors']}")
+
+    console.print("\n[cyan]Stage 2/2: Scoring pending jobs...[/cyan]")
+    score_result = run_scoring()
+    console.print(f"  Scored: {score_result['scored']} | Errors: {score_result['errors']} | Time: {score_result['elapsed']:.0f}s")
+
+    c = get_connection()
+    rows = c.execute("""
+        SELECT fit_score, title, site, location, url, full_description
+        FROM jobs
+        WHERE fit_score >= 7 AND discovered_at >= ?
+        ORDER BY fit_score DESC, title
+    """, (cutoff,)).fetchall()
+
+    total_with_score = len(rows)
+
+    if total_with_score == 0:
+        console.print("\n[yellow]Nenhuma vaga com score >= 7 encontrada neste periodo.[/yellow]")
+        if not no_telegram:
+            send_telegram_message(
+                f"<b>ApplyPilot - Relatorio Diario</b>\n"
+                f"{datetime.now().strftime('%d/%m/%Y')}\n\n"
+                f"Nenhuma vaga com score >= 7 nas ultimas {hours}h.\n"
+                f"Total de vagas novas: {result['new']} | Pontuadas: {score_result['scored']}",
+            )
+        return
+
+    top_rows = rows[:top]
+    date_str = datetime.now().strftime("%d/%m/%Y")
+
+    tg_lines = [
+        f"<b>ApplyPilot - Relatorio Diario</b>",
+        f"<b>{date_str}</b>",
+        f"",
+        f"Vagas com score >= 7 encontradas: <b>{total_with_score}</b>",
+        f"(Mostrando as {len(top_rows)} melhores)",
+        f"",
+    ]
+
+    for r in top_rows:
+        score_emoji = "🟢" if r["fit_score"] >= 9 else "🔵" if r["fit_score"] >= 8 else "🟡"
+        loc = (r["location"] or "Nao informada")[:40]
+        desc = (r["full_description"] or "")[:120].replace("\n", " ").strip()
+        title = r["title"][:60]
+        tg_lines.append(
+            f"{score_emoji} <b>[{r['fit_score']}/10]</b> {title}\n"
+            f"   {loc}\n"
+            f"   {desc}...\n"
+            f"   <a href='{r['url']}'>Ver vaga</a>\n"
+        )
+
+    if total_with_score > top:
+        tg_lines.append(f"... e mais {total_with_score - top} vaga(s).")
+
+    tg_lines.append(f"\nNovas: {result['new']} | Pontuadas: {score_result['scored']} | Total DB: {c.execute('SELECT count(*) FROM jobs').fetchone()[0]}")
+
+    tg_message = "\n".join(tg_lines)
+
+    report_path = APP_DIR / "daily_report.md"
+    md_lines = [
+        f"# ApplyPilot - Relatorio Diario - {date_str}",
+        "",
+        f"Vagas com score >= 7: **{total_with_score}**",
+        f"Vagas novas descobertas: {result['new']}",
+        f"Vagas pontuadas: {score_result['scored']}",
+        f"Periodo: ultimas {hours}h",
+        "",
+    ]
+    for r in rows:
+        desc = (r["full_description"] or "")[:250].replace("\n", " ").strip()
+        md_lines.append(f"## [{r['fit_score']}/10] {r['title']}")
+        md_lines.append(f"- Local: {r['location'] or 'Nao informada'}")
+        md_lines.append(f"- Link: {r['url']}")
+        md_lines.append(f"- Descricao: {desc}...")
+        md_lines.append("")
+    report_path.write_text("\n".join(md_lines), encoding="utf-8")
+
+    if not no_telegram:
+        ok = send_telegram_message(tg_message)
+        if ok:
+            console.print(f"\n[green]Telegram enviado com {len(top_rows)} vagas.[/green]")
+        else:
+            console.print(f"\n[yellow]Falha ao enviar Telegram. Verifique TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID no .env[/yellow]")
+    else:
+        console.print(f"\n[dim]Telegram skipado (--no-telegram).[/dim]")
+
+    console.print(f"[dim]Relatorio local salvo: {report_path}[/dim]")
+    console.print(f"[bold]Vagas score >= 7 encontradas: {total_with_score}[/bold]\n")
 
 
 if __name__ == "__main__":
