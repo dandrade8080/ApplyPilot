@@ -23,7 +23,7 @@ from applypilot.database import get_connection, get_jobs_by_stage, get_stats
 from applypilot.pipeline import STAGE_META, _STAGE_RUNNERS
 from applypilot.web.linkedin import scrape_profile
 
-bp = Blueprint("dashboard", __name__, template_folder="templates")
+bp = Blueprint("dashboard", __name__)
 
 # Background pipeline runner state
 _pipeline_thread: threading.Thread | None = None
@@ -1039,7 +1039,7 @@ def setup_wizard():
         pass
 
     return render_template("setup.html", profile=profile, searches=searches,
-                         env_vars=env_vars, resume_exists=resume_exists)
+                         env_vars=env_vars, resume_exists=resume_exists, resume_text="")
 
 
 @bp.route("/api/setup/profile", methods=["POST"])

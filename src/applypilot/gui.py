@@ -39,7 +39,7 @@ def main(
     port: int = 5050,
     host: str = "127.0.0.1",
     no_browser: bool = False,
-    debug: bool = False,
+    debug: bool = True,
 ) -> None:
     """Launch the ApplyPilot web interface.
 

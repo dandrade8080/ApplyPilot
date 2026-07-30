@@ -13,13 +13,15 @@ Usage:
 import sys
 from pathlib import Path
 
+_PROJECT_DIR = Path.cwd()
+
 a = Analysis(
-    ['src/applypilot/gui.py'],
-    pathex=[str(Path(__file__).parent)],
+    [str(_PROJECT_DIR / 'src' / 'applypilot' / 'gui.py')],
+    pathex=[str(_PROJECT_DIR)],
     binaries=[],
     datas=[
-        ('src/applypilot/web/templates', 'applypilot/web/templates'),
-        ('src/applypilot/config', 'applypilot/config'),
+        (str(_PROJECT_DIR / 'src' / 'applypilot' / 'web' / 'templates'), 'applypilot/web/templates'),
+        (str(_PROJECT_DIR / 'src' / 'applypilot' / 'config'), 'applypilot/config'),
     ],
     hiddenimports=[
         'applypilot.config',
@@ -28,6 +30,7 @@ a = Analysis(
         'applypilot.pipeline',
         'applypilot.web',
         'applypilot.web.routes',
+        'applypilot.web.linkedin',
         'applypilot.discovery',
         'applypilot.discovery.jobspy',
         'applypilot.scoring',
@@ -51,6 +54,9 @@ a = Analysis(
         'jinja2',
         'typer',
         'rich',
+        'ssl',
+        'email.mime.text',
+        'email.mime.multipart',
     ],
     hookspath=[],
     hooksconfig={},
