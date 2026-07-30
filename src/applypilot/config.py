@@ -101,6 +101,225 @@ def load_profile() -> dict:
     return json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
 
 
+def load_scoring_preferences() -> dict:
+    """Load scoring preferences from the user's profile, with sensible defaults.
+
+    Returns a dict with keys: industry, profession_category, seniority_target,
+    primary_skills, weight_factors, disqualify_title_keywords, target_title_keywords.
+    """
+    try:
+        profile = load_profile()
+    except FileNotFoundError:
+        profile = {}
+
+    prefs = profile.get("scoring_preferences", {})
+    if not prefs:
+        return _default_scoring_preferences(profile)
+
+    defaults = _default_scoring_preferences(profile)
+    for key in defaults:
+        if key not in prefs:
+            prefs[key] = defaults[key]
+
+    return prefs
+
+
+def _default_scoring_preferences(profile: dict) -> dict:
+    """Build sensible scoring defaults from whatever profile data exists.
+
+    Detects profession category by checking for tech-specific skill categories
+    (programming_languages, frameworks, databases, devops). Supports both the
+    new skills_boundary format (primary_skills, tools, certifications, soft_skills)
+    and the legacy format (programming_languages, frameworks, tools, databases, etc.).
+    """
+    exp = profile.get("experience", {})
+    skills = profile.get("skills_boundary", {})
+
+    tech_categories = ("programming_languages", "frameworks", "databases", "devops")
+    has_tech_skills = any(
+        isinstance(skills.get(cat), list) and len(skills.get(cat, [])) > 0
+        for cat in tech_categories
+    )
+
+    all_skills = []
+    for cat in ("primary_skills", "domain_expertise", "certifications",
+                "tools", "soft_skills", "programming_languages", "frameworks",
+                "databases", "devops", "design_tools", "languages"):
+        vals = skills.get(cat, [])
+        if isinstance(vals, list):
+            all_skills.extend(vals)
+
+    yrs = exp.get("years_of_experience_total", "")
+
+    seniority = "mid"
+    try:
+        yrs_int = int(yrs)
+        if yrs_int >= 15:
+            seniority = "executive"
+        elif yrs_int >= 10:
+            seniority = "director_vp"
+        elif yrs_int >= 7:
+            seniority = "senior_manager"
+        elif yrs_int >= 4:
+            seniority = "senior"
+        elif yrs_int >= 1:
+            seniority = "mid"
+    except (ValueError, TypeError):
+        pass
+
+    return {
+        "industry": profile.get("personal", {}).get("industry", ""),
+        "profession_category": "technology" if has_tech_skills else "business",
+        "seniority_target": seniority,
+        "primary_skills": all_skills[:15],
+        "weight_factors": {
+            "skills_match": "high",
+            "experience_years": "high",
+            "industry_match": "medium",
+            "seniority_match": "high",
+            "education": "medium",
+        },
+        "disqualify_title_keywords": [
+            "intern", "internship", "estágio", "estagiário", "trainee",
+            "junior", "assistant", "assistente", "auxiliar", "apprentice",
+        ],
+        "target_title_keywords": [],
+    }
+
+
+def build_scoring_prompt(resume_text: str, preferences: dict | None = None) -> str:
+    """Generate a dynamic scoring prompt based on the user's profile and preferences.
+
+    The prompt guides the LLM to evaluate job fit using criteria that are
+    relevant TO THIS SPECIFIC CANDIDATE, not generic software engineering criteria.
+
+    Args:
+        resume_text: The candidate's resume text (used to detect profile type).
+        preferences: Optional scoring_preferences dict. Loaded from profile if None.
+
+    Returns:
+        A complete system prompt string for the LLM scorer.
+    """
+    if preferences is None:
+        preferences = load_scoring_preferences()
+
+    industry = preferences.get("industry", "")
+    category = preferences.get("profession_category", "business")
+    seniority = preferences.get("seniority_target", "senior")
+    primary_skills = preferences.get("primary_skills", [])
+    weight_factors = preferences.get("weight_factors", {})
+
+    seniority_labels = {
+        "executive": "C-level/VP/Executive",
+        "director_vp": "Director/VP/Head",
+        "senior_manager": "Senior Manager/Manager",
+        "senior": "Senior-level individual contributor",
+        "mid": "Mid-level",
+        "entry": "Entry-level",
+    }
+    seniority_label = seniority_labels.get(seniority, "Manager-level")
+
+    base = f"""You are a job fit evaluator. Given a candidate's resume and a job description, score how well the candidate fits the role on a 1-10 scale.
+
+SCORING CRITERIA:
+- 9-10: Perfect match. Candidate has direct experience in nearly all required responsibilities and qualifications.
+- 7-8: Strong match. Candidate meets most requirements; minor gaps are easily bridged.
+- 5-6: Moderate match. Candidate has relevant background but is missing some key requirements.
+- 3-4: Weak match. Significant gaps in skills, experience level, or domain knowledge.
+- 1-2: Poor match. The role is in a different field, industry, or seniority level entirely.
+
+CANDIDATE PROFILE:
+- Target seniority: {seniority_label}
+- Target industry: {industry or "Any (open to opportunities across industries)"}
+"""
+
+    if primary_skills:
+        base += "- Core expertise: " + ", ".join(primary_skills[:10]) + "\n"
+
+    base += "\nIMPORTANT FACTORS (weighted for THIS candidate):\n"
+
+    factor_lines = _build_factor_lines(category, weight_factors, primary_skills, seniority_label)
+
+    base += "\n".join(factor_lines) + "\n"
+
+    base += f"""
+CRITICAL SENIORITY RULE:
+The candidate targets {seniority_label} roles. If the job title or description
+indicates it is clearly BELOW this seniority level (e.g. entry-level, junior,
+assistant, intern, trainee, or individual contributor when candidate targets leadership),
+score it 1-3 regardless of skill match. A senior professional should not be
+recommended for junior positions.
+
+RESPOND IN EXACTLY THIS FORMAT (no other text):
+SCORE: [1-10]
+KEYWORDS: [comma-separated keywords from the job description that match the candidate's profile]
+REASONING: [2-3 sentences explaining the score, mentioning specific matches or gaps]"""
+
+    return base
+
+
+def _build_factor_lines(category: str, weight_factors: dict, primary_skills: list, seniority_label: str) -> list[str]:
+    """Build the IMPORTANT FACTORS section based on profession category."""
+    skill_focus = weight_factors.get("skills_match", "high")
+    exp_focus = weight_factors.get("experience_years", "high")
+    industry_focus = weight_factors.get("industry_match", "medium")
+    seniority_focus = weight_factors.get("seniority_match", "high")
+    education_focus = weight_factors.get("education", "medium")
+
+    lines = []
+
+    if category == "technology":
+        lines.append("- Weight technical skills heavily (programming languages, frameworks, cloud, DevOps)")
+        lines.append("- Consider system design and architecture experience")
+        lines.append("- Evaluate project complexity and scale (users, throughput, team size)")
+        if primary_skills:
+            lines.append(f"- Specifically look for: {', '.join(primary_skills[:8])}")
+
+    elif category == "healthcare":
+        lines.append("- Weight clinical skills, certifications, and patient care experience heavily")
+        lines.append("- Consider medical licenses, board certifications, and specialized training")
+        lines.append("- Evaluate clinical setting match (hospital vs clinic vs private practice)")
+
+    elif category == "creative":
+        lines.append("- Weight portfolio quality, design tools proficiency, and creative output")
+        lines.append("- Consider visual/design skills and creative problem-solving")
+        lines.append("- Evaluate brand/agency experience and client-facing work")
+
+    elif category == "education":
+        lines.append("- Weight teaching experience, curriculum development, and pedagogical skills")
+        lines.append("- Consider certifications, degrees, and specialized training")
+        lines.append("- Evaluate classroom management and student engagement experience")
+
+    elif category == "legal":
+        lines.append("- Weight bar admission status, practice area specialization, and case experience")
+        lines.append("- Consider court experience, transaction volume, and client management")
+        lines.append("- Evaluate regulatory and compliance knowledge")
+
+    elif category == "supply_chain":
+        lines.append("- Weight supply chain, logistics, procurement, and operations experience")
+        lines.append("- Consider ERP systems knowledge (SAP, Oracle, etc.)")
+        lines.append("- Evaluate vendor management, inventory optimization, and cost reduction")
+        lines.append("- Consider certifications (APICS, CSCMP, Six Sigma, etc.)")
+
+    else:
+        lines.append("- Weight domain expertise and industry-specific knowledge heavily")
+        lines.append("- Consider leadership, strategy, and business impact")
+        lines.append("- Evaluate stakeholder management and cross-functional collaboration")
+        if primary_skills:
+            lines.append(f"- Core skills to look for: {', '.join(primary_skills[:8])}")
+
+    if exp_focus == "high":
+        lines.append("- Years of experience and career progression are critical — weigh them heavily")
+    if seniority_focus == "high":
+        lines.append(f"- Seniority level must be {seniority_label} or higher — penalize junior/entry roles")
+    if industry_focus in ("high", "medium"):
+        lines.append("- Consider industry/domain alignment")
+    if education_focus == "high":
+        lines.append("- Education level and relevant certifications are important")
+
+    return lines
+
+
 def load_search_config() -> dict:
     """Load search configuration from ~/.applypilot/searches.yaml."""
     import yaml
@@ -172,11 +391,10 @@ DEFAULTS = {
 
 
 def load_env():
-    """Load environment variables from ~/.applypilot/.env if it exists."""
+    """Load environment variables from ~/.applypilot/.env and CWD .env."""
     from dotenv import load_dotenv
     if ENV_PATH.exists():
         load_dotenv(ENV_PATH)
-    # Also try CWD .env as fallback
     load_dotenv()
 
 

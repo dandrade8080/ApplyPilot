@@ -13,7 +13,8 @@
     "linkedin_url": "https://www.linkedin.com/in/yourprofile",
     "github_url": "https://github.com/yourusername",
     "portfolio_url": "",
-    "website_url": ""
+    "website_url": "",
+    "industry": "Technology"
   },
   "work_authorization": {
     "legally_authorized_to_work": "Yes",
@@ -33,24 +34,43 @@
     "currency_conversion_note": ""
   },
   "experience": {
-    "years_of_experience_total": "3",
+    "years_of_experience_total": "5",
     "education_level": "Bachelor's Degree",
-    "current_job_title": "",
-    "current_company": "",
-    "target_role": "software engineer"
+    "current_job_title": "Senior Software Engineer",
+    "current_company": "Current Company Inc.",
+    "target_role": "Staff Software Engineer"
   },
   "skills_boundary": {
-    "languages": ["Python", "SQL", "JavaScript"],
-    "frameworks": ["FastAPI", "Flask", "React"],
-    "devops": ["Docker", "AWS", "CI/CD"],
-    "databases": ["PostgreSQL", "MongoDB"],
-    "tools": ["Git", "Linux"]
+    "primary_skills": ["Python", "System Design", "AWS", "React", "PostgreSQL"],
+    "tools": ["Docker", "Git", "Kubernetes", "Terraform"],
+    "certifications": ["AWS Solutions Architect"],
+    "soft_skills": ["Team Leadership", "Technical Writing", "Mentoring"]
   },
   "resume_facts": {
     "preserved_companies": ["Company A", "Company B"],
     "preserved_projects": ["Project X", "Project Y"],
     "preserved_school": "Your University",
     "real_metrics": ["50% improvement", "10x faster"]
+  },
+  "scoring_preferences": {
+    "industry": "Technology",
+    "profession_category": "technology",
+    "seniority_target": "senior",
+    "weight_factors": {
+      "skills_match": "high",
+      "experience_years": "high",
+      "seniority_match": "high",
+      "industry_match": "medium",
+      "education": "medium"
+    },
+    "disqualify_title_keywords": [
+      "intern", "internship", "junior", "trainee",
+      "assistant", "assistente", "auxiliar", "apprentice"
+    ],
+    "target_title_keywords": [
+      "senior software engineer", "staff engineer", "tech lead",
+      "principal engineer", "engineering manager"
+    ]
   },
   "eeo_voluntary": {
     "gender": "Decline to self-identify",

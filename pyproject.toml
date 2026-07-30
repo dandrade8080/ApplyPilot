@@ -1,6 +1,6 @@
 [project]
 name = "applypilot"
-version = "0.3.0"
+version = "0.4.0"
 description = "AI-powered end-to-end job application pipeline"
 readme = "README.md"
 license = "AGPL-3.0-only"
@@ -27,13 +27,16 @@ dependencies = [
     "pyyaml>=6.0",
     "pandas>=2.0",
     "flask>=3.0",
-    ]
+]
 
 [project.optional-dependencies]
+auto-apply = ["browser-use>=0.13.0", "langchain-openai>=0.3.0"]
 dev = ["pytest>=7.0", "ruff>=0.1"]
+build-exe = ["pyinstaller>=6.0"]
 
 [project.scripts]
 applypilot = "applypilot.cli:app"
+applypilot-gui = "applypilot.gui:main"
 
 [project.urls]
 Homepage = "https://github.com/Pickle-Pixel/ApplyPilot"

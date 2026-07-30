@@ -1,0 +1,521 @@
+{% extends "base.html" %}
+{% block title %}Setup — ApplyPilot{% endblock %}
+
+{% block head %}
+<style>
+  .wizard-container { max-width: 720px; margin: 0 auto; padding: 40px 20px; }
+  .wizard-header { text-align: center; margin-bottom: 30px; }
+  .wizard-header h1 { color: var(--accent); font-size: 1.8em; margin-bottom: 8px; }
+  .wizard-header p { color: var(--text-dim); font-size: 0.95em; }
+  .steps-indicator { display: flex; justify-content: center; gap: 8px; margin-bottom: 40px; }
+  .step-dot { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; background: var(--bg-card); color: var(--text-dim); border: 2px solid var(--border); transition: all 0.3s; font-size: 0.85em; }
+  .step-dot.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .step-dot.done { background: var(--green); color: #fff; border-color: var(--green); }
+  .step-connector { width: 40px; height: 2px; background: var(--border); align-self: center; }
+  .step-connector.done { background: var(--green); }
+  .wizard-step { display: none; }
+  .wizard-step.active { display: block; animation: fadeIn 0.3s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  .form-group { margin-bottom: 18px; }
+  .form-group label { display: block; font-weight: 600; margin-bottom: 4px; color: var(--text); font-size: 0.9em; }
+  .form-group .hint { font-size: 0.8em; color: var(--text-dim); margin-bottom: 6px; }
+  .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-card); color: var(--text); font-size: 0.95em; transition: border-color 0.2s; }
+  .form-group input:focus, .form-group textarea:focus, .form-group select:focus { outline: none; border-color: var(--accent); }
+  .form-group textarea { min-height: 100px; resize: vertical; font-family: inherit; }
+  .form-group select { cursor: pointer; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .radio-group { display: flex; gap: 12px; flex-wrap: wrap; }
+  .radio-option { padding: 8px 16px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; transition: all 0.2s; font-size: 0.9em; }
+  .radio-option:hover { border-color: var(--accent); }
+  .radio-option.selected { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn { padding: 10px 24px; border: none; border-radius: 8px; font-size: 0.95em; cursor: pointer; font-weight: 600; transition: all 0.2s; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { opacity: 0.9; }
+  .btn-secondary { background: var(--bg-card); color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { border-color: var(--accent); }
+  .btn-danger { background: var(--red); color: #fff; }
+  .wizard-actions { display: flex; justify-content: space-between; margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--border); }
+  .file-upload-area { border: 2px dashed var(--border); border-radius: 12px; padding: 40px 20px; text-align: center; cursor: pointer; transition: all 0.2s; }
+  .file-upload-area:hover { border-color: var(--accent); }
+  .file-upload-area .icon { font-size: 2em; margin-bottom: 8px; }
+  .file-upload-area.drag-over { border-color: var(--accent); background: rgba(99, 102, 241, 0.05); }
+  .file-upload-area.has-file { border-style: solid; border-color: var(--green); background: rgba(34, 197, 94, 0.05); }
+  .file-name { color: var(--green); font-weight: 600; margin-top: 8px; }
+  .skill-tag { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background: var(--accent); color: #fff; border-radius: 20px; font-size: 0.82em; margin: 2px; }
+  .skill-tag .remove { cursor: pointer; font-weight: 700; margin-left: 2px; }
+  .toast { position: fixed; top: 20px; right: 20px; padding: 12px 20px; border-radius: 8px; color: #fff; z-index: 9999; animation: slideIn 0.3s ease; font-size: 0.9em; }
+  .toast.success { background: var(--green); }
+  .toast.error { background: var(--red); }
+  @keyframes slideIn { from { transform: translateX(100px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  .completion-box { text-align: center; padding: 40px 20px; }
+  .completion-box .icon { font-size: 4em; margin-bottom: 16px; }
+  .completion-box h2 { color: var(--green); margin-bottom: 8px; }
+  .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; text-align: left; }
+  .feature-item { padding: 12px; background: var(--bg-card); border-radius: 8px; border: 1px solid var(--border); }
+  .feature-item .title { font-weight: 600; margin-bottom: 4px; }
+  .feature-item .desc { font-size: 0.85em; color: var(--text-dim); }
+  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.6s linear infinite; margin-right: 8px; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .current-prefs { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; margin-top: 8px; font-size: 0.85em; color: var(--text-dim); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="wizard-container">
+  <div class="wizard-header">
+    <h1>Configurar ApplyPilot</h1>
+    <p>5 passos para começar a buscar vagas automaticamente</p>
+  </div>
+
+  <div class="steps-indicator">
+    <span class="step-dot active" data-step="1">1</span><span class="step-connector" data-conn="1"></span>
+    <span class="step-dot" data-step="2">2</span><span class="step-connector" data-conn="2"></span>
+    <span class="step-dot" data-step="3">3</span><span class="step-connector" data-conn="3"></span>
+    <span class="step-dot" data-step="4">4</span><span class="step-connector" data-conn="4"></span>
+    <span class="step-dot" data-step="5">5</span>
+  </div>
+
+  <!-- STEP 1: Resume -->
+  <div class="wizard-step active" data-step="1">
+    <h3>Passo 1: Seu Currículo</h3>
+    <p class="hint">Envie seu currículo em .txt ou .pdf, ou cole o texto abaixo.</p>
+
+    <div class="file-upload-area {% if resume_exists %}has-file{% endif %}" id="dropZone" onclick="document.getElementById('resumeFile').click()">
+      <div class="icon">{% if resume_exists %}&#9989;{% else %}&#128196;{% endif %}</div>
+      <p>{% if resume_exists %}Currículo já configurado. Clique para substituir.{% else %}Arraste um arquivo aqui ou clique para selecionar{% endif %}</p>
+      <input type="file" id="resumeFile" accept=".txt,.pdf" style="display:none" onchange="handleResumeFile(this)">
+      <div id="fileName" class="file-name"></div>
+    </div>
+    <p style="text-align:center; margin:16px 0; color:var(--text-dim)">— ou —</p>
+    <div class="form-group">
+      <label>Cole o texto do seu currículo</label>
+      <textarea id="resumeText" placeholder="Experiência profissional, formação, habilidades..." style="min-height:150px">{{ resume_text or '' }}</textarea>
+    </div>
+    <div class="wizard-actions">
+      <span></span>
+      <button class="btn btn-primary" onclick="saveResume()">Salvar e continuar →</button>
+    </div>
+  </div>
+
+  <!-- STEP 2: Profile -->
+  <div class="wizard-step" data-step="2">
+    <h3>Passo 2: Seu Perfil</h3>
+    <p class="hint">Esses dados serão usados para pontuar vagas e preencher formulários.</p>
+
+    <div class="form-row">
+      <div class="form-group"><label>Nome completo</label><input id="full_name" value="{{ profile.personal.full_name or '' }}"></div>
+      <div class="form-group"><label>Email</label><input id="email" type="email" value="{{ profile.personal.email or '' }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Telefone</label><input id="phone" value="{{ profile.personal.phone or '' }}"></div>
+      <div class="form-group"><label>Cidade</label><input id="city" value="{{ profile.personal.city or '' }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Estado/Província</label><input id="province_state" value="{{ profile.personal.province_state or '' }}"></div>
+      <div class="form-group"><label>País</label><input id="country" value="{{ profile.personal.country or '' }}"></div>
+    </div>
+    <div class="form-group"><label>LinkedIn URL</label><input id="linkedin_url" value="{{ profile.personal.linkedin_url or '' }}"></div>
+
+    <hr style="border-color:var(--border); margin:20px 0">
+    <div class="form-row">
+      <div class="form-group"><label>Cargo atual</label><input id="current_title" value="{{ profile.experience.current_job_title or '' }}"></div>
+      <div class="form-group"><label>Cargo alvo (o que você busca)</label><input id="target_role" value="{{ profile.experience.target_role or '' }}" placeholder="Ex: Gerente de Marketing"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Anos de experiência</label><input id="years_of_experience" type="number" value="{{ profile.experience.years_of_experience_total or '' }}"></div>
+      <div class="form-group"><label>Nível de educação</label><input id="education_level" value="{{ profile.experience.education_level or '' }}" placeholder="Ex: MBA, Graduação"></div>
+    </div>
+    <div class="form-group"><label>Indústria</label><input id="industry" value="{{ profile.personal.industry or '' }}" placeholder="Ex: Marketing, Tecnologia, Saúde"></div>
+
+    <hr style="border-color:var(--border); margin:20px 0">
+    <p style="font-weight:600; margin-bottom:8px">Habilidades principais</p>
+    <div class="form-group"><label>Suas principais competências (separadas por vírgula)</label><input id="primary_skills" value="{{ profile.skills_boundary.primary_skills | join(', ') if profile.skills_boundary else '' }}" placeholder="Ex: Marketing Digital, Branding, Liderança de Equipes, CRM"></div>
+    <div class="form-group"><label>Ferramentas e plataformas que você domina</label><input id="tools" value="{{ profile.skills_boundary.tools | join(', ') if profile.skills_boundary else '' }}" placeholder="Ex: Google Analytics, HubSpot, Excel, SAP"></div>
+    <div class="form-group"><label>Certificações</label><input id="certifications" value="{{ profile.skills_boundary.certifications | join(', ') if profile.skills_boundary else '' }}" placeholder="Ex: PMP, CPA, AWS Certified"></div>
+    <div class="form-group"><label>Soft skills / Competências comportamentais</label><input id="soft_skills" value="{{ profile.skills_boundary.soft_skills | join(', ') if profile.skills_boundary else '' }}" placeholder="Ex: Comunicação, Negociação, Gestão de Pessoas"></div>
+
+    <div class="wizard-actions">
+      <button class="btn btn-secondary" onclick="prevStep(2)">← Voltar</button>
+      <button class="btn btn-primary" onclick="saveProfile()">Salvar e continuar →</button>
+    </div>
+  </div>
+
+  <!-- STEP 3: Search Configuration -->
+  <div class="wizard-step" data-step="3">
+    <h3>Passo 3: Busca de Vagas</h3>
+    <p class="hint">Defina quais cargos, locais e sites você quer buscar.</p>
+
+    <div class="form-group">
+      <label>Cargos alvo (separados por vírgula)</label>
+      <input id="target_titles" value="{{ searches.queries | map(attribute='query') | join(', ') if searches.queries else '' }}" placeholder="Ex: Gerente de Marketing, Head de Marketing, Diretor de Marketing">
+      <div class="hint">Esses são os termos exatos que serão buscados nos sites de vagas.</div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Localização principal</label>
+        <input id="search_location" value="{{ searches.locations[0].location if searches.locations else 'São Paulo' }}">
+      </div>
+      <div class="form-group">
+        <label>Trabalho remoto?</label>
+        <select id="search_remote">
+          <option value="true" {% if searches.locations and searches.locations[0].remote %}selected{% endif %}>Sim</option>
+          <option value="false">Não</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Outras localizações aceitas (separadas por vírgula)</label>
+      <input id="location_accept" value="{{ searches.location_accept | join(', ') if searches.location_accept else '' }}" placeholder="Ex: São Paulo, Campinas, Grande SP">
+    </div>
+
+    <hr style="border-color:var(--border); margin:20px 0">
+    <p style="font-weight:600; margin-bottom:8px">Sites de busca</p>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="site_linkedin" {% if not searches.sites or 'linkedin' in searches.sites %}checked{% endif %}> LinkedIn
+      </label>
+      <label style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="site_indeed" {% if not searches.sites or 'indeed' in searches.sites %}checked{% endif %}> Indeed
+      </label>
+      <label style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="site_glassdoor" {% if searches.sites and 'glassdoor' in searches.sites %}checked{% endif %}> Glassdoor
+      </label>
+      <label style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="site_zip" {% if searches.sites and 'zip_recruiter' in searches.sites %}checked{% endif %}> ZipRecruiter
+      </label>
+    </div>
+
+    <hr style="border-color:var(--border); margin:20px 0">
+    <p style="font-weight:600; margin-bottom:8px">Filtros</p>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Buscar vagas das últimas (horas)</label>
+        <input id="hours_old" type="number" value="{{ searches.defaults.hours_old or 24 }}">
+        <div class="hint">24 = últimas 24h. 72 = 3 dias. 168 = 1 semana.</div>
+      </div>
+      <div class="form-group">
+        <label>Resultados por site</label>
+        <input id="results_per_site" type="number" value="{{ searches.defaults.results_per_site or 50 }}">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Excluir vagas com estes termos no título (separados por vírgula)</label>
+      <input id="exclude_titles" value="{{ searches.exclude_titles | join(', ') if searches.exclude_titles else 'intern, estagio, junior, trainee, assistente, auxiliar' }}" placeholder="Ex: intern, junior, estagio, trainee">
+      <div class="hint">Isso filtra vagas abaixo do seu nível. Deixe em branco se não quiser filtrar.</div>
+    </div>
+
+    <div class="wizard-actions">
+      <button class="btn btn-secondary" onclick="prevStep(3)">← Voltar</button>
+      <button class="btn btn-primary" onclick="saveSearches()">Salvar e continuar →</button>
+    </div>
+  </div>
+
+  <!-- STEP 4: Scoring Preferences -->
+  <div class="wizard-step" data-step="4">
+    <h3>Passo 4: Preferências de Pontuação</h3>
+    <p class="hint">O que a IA deve priorizar ao avaliar vagas para você? Isso define quais vagas aparecerão no topo.</p>
+
+    <div class="form-group">
+      <label>Categoria profissional</label>
+      <select id="profession_category">
+        <option value="business">Negócios e Gestão (Marketing, Finanças, RH, Operações)</option>
+        <option value="technology">Tecnologia e Software</option>
+        <option value="supply_chain">Supply Chain e Logística</option>
+        <option value="healthcare">Saúde e Medicina</option>
+        <option value="creative">Criativo e Design</option>
+        <option value="education">Educação e Ensino</option>
+        <option value="legal">Jurídico e Compliance</option>
+        <option value="other">Outro</option>
+      </select>
+      <div class="hint">Isso define quais critérios a IA usa. Marketing pesa liderança e estratégia. Tecnologia pesa programação e sistemas.</div>
+    </div>
+    <div class="form-group">
+      <label>Senioridade alvo</label>
+      <select id="seniority_target">
+        <option value="executive">C-level / VP / Executivo</option>
+        <option value="director_vp">Diretor / VP / Head</option>
+        <option value="senior_manager" selected>Gerente Sênior / Gerente</option>
+        <option value="senior">Sênior (contribuidor individual)</option>
+        <option value="mid">Pleno / Intermediário</option>
+        <option value="entry">Júnior / Iniciante</option>
+      </select>
+      <div class="hint">Vagas abaixo da sua senioridade serão automaticamente desvalorizadas.</div>
+    </div>
+
+    <hr style="border-color:var(--border); margin:20px 0">
+    <p style="font-weight:600; margin-bottom:8px">Peso de cada fator na pontuação</p>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Match de habilidades</label>
+        <select id="weight_skills"><option value="high" selected>Alto</option><option value="medium">Medio</option><option value="low">Baixo</option></select>
+      </div>
+      <div class="form-group">
+        <label>Anos de experiencia</label>
+        <select id="weight_experience"><option value="high" selected>Alto</option><option value="medium">Medio</option><option value="low">Baixo</option></select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Nivel de senioridade</label>
+        <select id="weight_seniority"><option value="high" selected>Alto</option><option value="medium">Medio</option><option value="low">Baixo</option></select>
+      </div>
+      <div class="form-group">
+        <label>Industria/Setor</label>
+        <select id="weight_industry"><option value="medium" selected>Medio</option><option value="high">Alto</option><option value="low">Baixo</option></select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Educacao e certificacoes</label>
+      <select id="weight_education"><option value="medium" selected>Medio</option><option value="high">Alto</option><option value="low">Baixo</option></select>
+    </div>
+
+    <hr style="border-color:var(--border); margin:20px 0">
+    <div class="form-group">
+      <label>Palavras que DESQUALIFICAM uma vaga (separadas por virgula)</label>
+      <input id="disqualify_keywords" value="intern, internship, estagio, estagiario, trainee, junior, assistant, assistente, auxiliar, apprentice" placeholder="Ex: intern, junior, estagio">
+      <div class="hint">Se o titulo da vaga contiver qualquer uma dessas palavras, ela recebe nota baixa automaticamente.</div>
+    </div>
+
+    <div class="wizard-actions">
+      <button class="btn btn-secondary" onclick="prevStep(4)">← Voltar</button>
+      <button class="btn btn-primary" onclick="saveScoring()">Salvar e continuar →</button>
+    </div>
+  </div>
+
+  <!-- STEP 5: AI & Finish -->
+  <div class="wizard-step" data-step="5">
+    <h3>Passo 5: Inteligencia Artificial e Finalizar</h3>
+    <p class="hint">Para pontuar vagas e gerar curriculos personalizados, voce precisa de uma chave de API LLM. O Gemini do Google e gratuito.</p>
+
+    <div class="form-group">
+      <label>Provedor LLM</label>
+      <select id="llm_provider" onchange="toggleProviderFields()">
+        <option value="gemini" selected>Gemini (Google — gratuito, recomendado)</option>
+        <option value="deepseek">DeepSeek</option>
+        <option value="openai">OpenAI</option>
+        <option value="none">Nao quero usar IA (apenas busca de vagas)</option>
+      </select>
+    </div>
+    <div id="providerFields">
+      <div class="form-group">
+        <label>Chave da API</label>
+        <input id="api_key" type="password" placeholder="Cole sua chave aqui">
+        <div class="hint" id="apiHint">Gemini: va em <a href="https://aistudio.google.com" target="_blank">aistudio.google.com</a> > Get API Key > Create API Key (gratuito, 1.500 requisições/dia)</div>
+      </div>
+      <div class="form-group">
+        <label>Modelo (opcional)</label>
+        <input id="llm_model" placeholder="gemini-2.0-flash" value="gemini-2.0-flash">
+      </div>
+    </div>
+
+    <hr style="border-color:var(--border); margin:20px 0">
+
+    <div class="completion-box">
+      <div class="icon">&#127881;</div>
+      <h2>Tudo pronto!</h2>
+      <p style="color:var(--text-dim); margin-bottom:16px">Voce configurou:</p>
+      <div class="feature-grid">
+        <div class="feature-item"><div class="title">Curriculo</div><div class="desc">Seu curriculo para pontuacao</div></div>
+        <div class="feature-item"><div class="title">Perfil</div><div class="desc">Dados pessoais e profissionais</div></div>
+        <div class="feature-item"><div class="title">Busca</div><div class="desc">Cargos e sites configurados</div></div>
+        <div class="feature-item"><div class="title">Pontuacao</div><div class="desc">Criterios personalizados de avaliacao</div></div>
+      </div>
+    </div>
+
+    <div class="wizard-actions" style="justify-content:center">
+      <button class="btn btn-secondary" onclick="prevStep(5)">← Voltar</button>
+      <button class="btn btn-primary" onclick="finishSetup()" id="finishBtn">
+        <span id="finishSpinner" class="spinner" style="display:none"></span>
+        Finalizar Configuracao
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  let currentStep = 1;
+  const totalSteps = 5;
+  let resumeHasFile = {{ 'true' if resume_exists else 'false' }};
+
+  function updateSteps() {
+    document.querySelectorAll('.step-dot').forEach(d => {
+      const s = parseInt(d.dataset.step);
+      d.classList.remove('active', 'done');
+      if (s === currentStep) d.classList.add('active');
+      if (s < currentStep) d.classList.add('done');
+    });
+    document.querySelectorAll('.step-connector').forEach(c => {
+      const s = parseInt(c.dataset.conn);
+      if (s < currentStep) c.classList.add('done'); else c.classList.remove('done');
+    });
+    document.querySelectorAll('.wizard-step').forEach(w => {
+      w.classList.toggle('active', parseInt(w.dataset.step) === currentStep);
+    });
+    window.scrollTo({top: 0, behavior: 'smooth'});
+  }
+
+  function goToStep(n) { currentStep = n; updateSteps(); }
+  function nextStep() { if (currentStep < totalSteps) goToStep(currentStep + 1); }
+  function prevStep(from) { goToStep(from - 1); }
+
+  function showToast(msg, type) {
+    const t = document.createElement('div');
+    t.className = 'toast ' + type;
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 3000);
+  }
+
+  function handleResumeFile(input) {
+    if (input.files.length > 0) {
+      document.getElementById('fileName').textContent = input.files[0].name;
+      document.getElementById('dropZone').classList.add('has-file');
+      resumeHasFile = true;
+    }
+  }
+
+  async function saveResume() {
+    const file = document.getElementById('resumeFile').files[0];
+    const text = document.getElementById('resumeText').value;
+
+    if (file) {
+      const fd = new FormData();
+      fd.append('file', file);
+      const r = await fetch('/api/setup/resume', {method:'POST', body:fd});
+      const j = await r.json();
+      if (j.ok) { showToast('Curriculo salvo!', 'success'); nextStep(); }
+      else showToast('Erro: ' + j.error, 'error');
+    } else if (text.trim()) {
+      const r = await fetch('/api/setup/resume', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text})});
+      const j = await r.json();
+      if (j.ok) { showToast('Curriculo salvo!', 'success'); nextStep(); }
+      else showToast('Erro: ' + j.error, 'error');
+    } else {
+      showToast('Envie um arquivo ou cole o texto do curriculo.', 'error');
+    }
+  }
+
+  async function saveProfile() {
+    const data = {
+      full_name: document.getElementById('full_name').value,
+      email: document.getElementById('email').value,
+      phone: document.getElementById('phone').value,
+      city: document.getElementById('city').value,
+      province_state: document.getElementById('province_state').value,
+      country: document.getElementById('country').value,
+      linkedin_url: document.getElementById('linkedin_url').value,
+      industry: document.getElementById('industry').value,
+      current_title: document.getElementById('current_title').value,
+      target_role: document.getElementById('target_role').value,
+      years_of_experience: document.getElementById('years_of_experience').value,
+      education_level: document.getElementById('education_level').value,
+      primary_skills: document.getElementById('primary_skills').value,
+      tools: document.getElementById('tools').value,
+      certifications: document.getElementById('certifications').value,
+      soft_skills: document.getElementById('soft_skills').value,
+    };
+    const r = await fetch('/api/setup/profile', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+    const j = await r.json();
+    if (j.ok) { showToast('Perfil salvo!', 'success'); nextStep(); }
+    else showToast('Erro: ' + j.error, 'error');
+  }
+
+  async function saveSearches() {
+    const sites = [];
+    if (document.getElementById('site_linkedin').checked) sites.push('linkedin');
+    if (document.getElementById('site_indeed').checked) sites.push('indeed');
+    if (document.getElementById('site_glassdoor').checked) sites.push('glassdoor');
+    if (document.getElementById('site_zip').checked) sites.push('zip_recruiter');
+
+    const data = {
+      target_titles: document.getElementById('target_titles').value,
+      location: document.getElementById('search_location').value,
+      remote: document.getElementById('search_remote').value === 'true',
+      location_accept: document.getElementById('location_accept').value,
+      sites: sites,
+      hours_old: parseInt(document.getElementById('hours_old').value) || 24,
+      results_per_site: parseInt(document.getElementById('results_per_site').value) || 50,
+      exclude_titles: document.getElementById('exclude_titles').value,
+      country_indeed: 'brazil',
+      country_code: 'BRA',
+    };
+    const r = await fetch('/api/setup/searches', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+    const j = await r.json();
+    if (j.ok) { showToast('Busca configurada!', 'success'); nextStep(); }
+    else showToast('Erro: ' + j.error, 'error');
+  }
+
+  async function saveScoring() {
+    const data = {
+      industry: document.getElementById('industry').value || document.getElementById('profession_category').value,
+      profession_category: document.getElementById('profession_category').value,
+      seniority_target: document.getElementById('seniority_target').value,
+      primary_skills: document.getElementById('primary_skills').value,
+      weight_skills: document.getElementById('weight_skills').value,
+      weight_experience: document.getElementById('weight_experience').value,
+      weight_seniority: document.getElementById('weight_seniority').value,
+      weight_industry: document.getElementById('weight_industry').value,
+      weight_education: document.getElementById('weight_education').value,
+      disqualify_keywords: document.getElementById('disqualify_keywords').value,
+      target_keywords: document.getElementById('target_titles').value,
+    };
+    const r = await fetch('/api/setup/scoring', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)});
+    const j = await r.json();
+    if (j.ok) { showToast('Preferencias salvas!', 'success'); nextStep(); }
+    else showToast('Erro: ' + j.error, 'error');
+  }
+
+  function toggleProviderFields() {
+    const p = document.getElementById('llm_provider').value;
+    const fields = document.getElementById('providerFields');
+    const hint = document.getElementById('apiHint');
+    fields.style.display = p === 'none' ? 'none' : 'block';
+    if (p === 'gemini') hint.innerHTML = 'Gemini: va em <a href="https://aistudio.google.com" target="_blank">aistudio.google.com</a> > Get API Key > Create API Key (gratuito, 1.500 requisições/dia)';
+    else if (p === 'openai') hint.innerHTML = 'OpenAI: va em <a href="https://platform.openai.com/api-keys" target="_blank">platform.openai.com/api-keys</a>';
+    else if (p === 'deepseek') hint.innerHTML = 'DeepSeek: va em <a href="https://platform.deepseek.com/api_keys" target="_blank">platform.deepseek.com/api_keys</a>';
+  }
+
+  async function finishSetup() {
+    const btn = document.getElementById('finishBtn');
+    const spinner = document.getElementById('finishSpinner');
+    btn.disabled = true;
+    spinner.style.display = 'inline-block';
+
+    const provider = document.getElementById('llm_provider').value;
+    if (provider !== 'none') {
+      const apiKey = document.getElementById('api_key').value;
+      const model = document.getElementById('llm_model').value;
+      if (apiKey) {
+        await fetch('/api/setup/env', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({provider, api_key: apiKey, model})
+        });
+      }
+    }
+
+    await fetch('/api/setup/complete', {method:'POST'});
+
+    showToast('Configuracao finalizada! Redirecionando...', 'success');
+    setTimeout(() => window.location.href = '/', 1500);
+  }
+
+  const dropZone = document.getElementById('dropZone');
+  if (dropZone) {
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+    dropZone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropZone.classList.remove('drag-over');
+      if (e.dataTransfer.files.length > 0) {
+        document.getElementById('resumeFile').files = e.dataTransfer.files;
+        handleResumeFile(document.getElementById('resumeFile'));
+      }
+    });
+  }
+
+  // Pre-fill profile fields from existing data
+  updateSteps();
+</script>
+{% endblock %}

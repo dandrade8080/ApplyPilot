@@ -102,6 +102,7 @@ def _setup_profile() -> dict:
         "portfolio_url": Prompt.ask("Portfolio URL (optional)", default=""),
         "website_url": Prompt.ask("Personal website URL (optional)", default=""),
         "password": Prompt.ask("Job site password (used for login walls during auto-apply)", password=True, default=""),
+        "industry": Prompt.ask("Industry (e.g. Marketing, Technology, Finance, Healthcare)", default=""),
     }
 
     # -- Work Authorization --
@@ -136,15 +137,32 @@ def _setup_profile() -> dict:
         "target_role": target_role,
     }
 
-    # -- Skills Boundary --
-    console.print("\n[bold cyan]Skills[/bold cyan] (comma-separated)")
-    langs = Prompt.ask("Programming languages", default="")
-    frameworks = Prompt.ask("Frameworks & libraries", default="")
-    tools = Prompt.ask("Tools & platforms (e.g. Docker, AWS, Git)", default="")
+    # -- Skills Boundary (profession-agnostic) --
+    console.print("\n[bold cyan]Skills & Expertise[/bold cyan]")
+    console.print("[dim]List your core professional skills. What are you known for?[/dim]")
+    console.print("[dim]Examples by profession:[/dim]")
+    console.print("[dim]  Marketing: Brand Strategy, Digital Marketing, Campaign Management, SEO, Team Leadership[/dim]")
+    console.print("[dim]  Supply Chain: Logistics, Procurement, SAP, Inventory Management, Vendor Negotiation[/dim]")
+    console.print("[dim]  Software Engineer: Python, React, AWS, Docker, System Design, PostgreSQL[/dim]")
+    console.print("[dim]  Healthcare: Patient Care, Diagnosis, Surgery, EHR Systems, Clinical Research[/dim]")
+
+    primary_skills_raw = Prompt.ask("Your core skills (comma-separated)")
+    primary_skills = [s.strip() for s in primary_skills_raw.split(",") if s.strip()]
+
+    tools_raw = Prompt.ask("Tools, platforms & languages you use (comma-separated)", default="")
+    tools = [s.strip() for s in tools_raw.split(",") if s.strip()]
+
+    certs_raw = Prompt.ask("Certifications & licenses (comma-separated)", default="")
+    certs = [s.strip() for s in certs_raw.split(",") if s.strip()]
+
+    soft_raw = Prompt.ask("Soft skills / leadership competencies (comma-separated)", default="")
+    soft = [s.strip() for s in soft_raw.split(",") if s.strip()]
+
     profile["skills_boundary"] = {
-        "programming_languages": [s.strip() for s in langs.split(",") if s.strip()],
-        "frameworks": [s.strip() for s in frameworks.split(",") if s.strip()],
-        "tools": [s.strip() for s in tools.split(",") if s.strip()],
+        "primary_skills": primary_skills,
+        "tools": tools,
+        "certifications": certs,
+        "soft_skills": soft,
     }
 
     # -- Resume Facts (preserved truths for tailoring) --
@@ -185,10 +203,10 @@ def _setup_profile() -> dict:
 # ---------------------------------------------------------------------------
 
 def _setup_searches() -> None:
-    """Generate a searches.yaml from user input."""
-    console.print(Panel("[bold]Step 3: Job Search Config[/bold]\nDefine what you're looking for."))
+    """Generate a comprehensive searches.yaml from user input."""
+    console.print(Panel("[bold]Step 3: Job Search Config[/bold]\nDefine what jobs you're looking for and where."))
 
-    location = Prompt.ask("Target location (e.g. 'Remote', 'Canada', 'New York, NY')", default="Remote")
+    location = Prompt.ask("Target location (e.g. 'Remote', 'São Paulo', 'New York, NY')", default="Remote")
     distance_str = Prompt.ask("Search radius in miles (0 for remote-only)", default="0")
     try:
         distance = int(distance_str)
@@ -196,37 +214,183 @@ def _setup_searches() -> None:
         distance = 0
 
     roles_raw = Prompt.ask(
-        "Target job titles (comma-separated, e.g. 'Backend Engineer, Full Stack Developer')"
+        "Target job titles (comma-separated, e.g. 'Marketing Director, Head of Marketing, CMO')"
     )
     roles = [r.strip() for r in roles_raw.split(",") if r.strip()]
 
     if not roles:
         console.print("[yellow]No roles provided. Using a default set.[/yellow]")
-        roles = ["Software Engineer"]
+        roles = ["Manager"]
 
-    # Build YAML content
+    console.print("\n[dim]Which job boards to search?[/dim]")
+    use_linkedin = Confirm.ask("Search LinkedIn?", default=True)
+    use_indeed = Confirm.ask("Search Indeed?", default=True)
+    use_glassdoor = Confirm.ask("Search Glassdoor?", default=False)
+    use_zip = Confirm.ask("Search ZipRecruiter?", default=False)
+
+    sites = []
+    if use_linkedin:
+        sites.append("linkedin")
+    if use_indeed:
+        sites.append("indeed")
+    if use_glassdoor:
+        sites.append("glassdoor")
+    if use_zip:
+        sites.append("zip_recruiter")
+    if not sites:
+        sites = ["linkedin", "indeed"]
+
+    console.print("\n[dim]How far back should we look for jobs?[/dim]")
+    hours_old = Prompt.ask("Hours old (e.g. 72 for 3 days, 168 for 1 week)", default="72")
+    results_per_site = Prompt.ask("Max results per job board per search", default="50")
+
+    console.print("\n[dim]Are there job title keywords you want to EXCLUDE?[/dim]")
+    console.print("[dim]These filter out roles below your target level (e.g. intern, junior, assistant).[/dim]")
+    exclude_raw = Prompt.ask(
+        "Exclude titles containing (comma-separated)",
+        default="intern, internship, estagio, estagiario, trainee, junior, assistant, assistente, auxiliar, apprentice"
+    )
+    exclude_titles = [e.strip() for e in exclude_raw.split(",") if e.strip()]
+
+    console.print("\n[dim]Country configuration for job boards:[/dim]")
+    country_indeed = Prompt.ask("Indeed country code", default="brazil")
+    country_code = Prompt.ask("Country code (e.g. BRA, USA, CAN)", default="BRA")
+
     lines = [
         "# ApplyPilot search configuration",
-        "# Edit this file to refine your job search queries.",
+        "# Generated by: applypilot init",
+        "",
+        f"country: \"{country_code}\"",
         "",
         "defaults:",
-        f'  location: "{location}"',
-        f"  distance: {distance}",
-        "  hours_old: 72",
-        "  results_per_site: 50",
+        f"  results_per_site: {results_per_site}",
+        f"  hours_old: {hours_old}",
+        f"  country_indeed: \"{country_indeed}\"",
         "",
         "locations:",
-        f'  - location: "{location}"',
+        f"  - location: \"{location}\"",
         f"    remote: {str(distance == 0).lower()}",
         "",
-        "queries:",
+        "sites:",
     ]
+    for s in sites:
+        lines.append(f"  - {s}")
+
+    lines.append("")
+    lines.append("location_accept:")
+    lines.append(f'  - "{location}"')
+
+    if exclude_titles:
+        lines.append("")
+        lines.append("exclude_titles:")
+        for et in exclude_titles:
+            lines.append(f'  - "{et}"')
+
+    lines.append("")
+    lines.append("queries:")
     for i, role in enumerate(roles):
         lines.append(f'  - query: "{role}"')
         lines.append(f"    tier: {min(i + 1, 3)}")
 
     SEARCH_CONFIG_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
     console.print(f"[green]Search config saved to {SEARCH_CONFIG_PATH}[/green]")
+
+
+# ---------------------------------------------------------------------------
+# Scoring preferences (NEW — profession-aware)
+# ---------------------------------------------------------------------------
+
+_PROFESSION_CATEGORIES = {
+    "technology": "Technology & Software",
+    "business": "Business & Management (Marketing, Finance, HR, Operations)",
+    "supply_chain": "Supply Chain & Logistics",
+    "healthcare": "Healthcare & Medical",
+    "creative": "Creative & Design",
+    "education": "Education & Teaching",
+    "legal": "Legal & Compliance",
+    "other": "Other / Not listed",
+}
+
+_SENIORITY_LEVELS = {
+    "executive": "C-level / VP / Executive",
+    "director_vp": "Director / VP / Head",
+    "senior_manager": "Senior Manager / Manager",
+    "senior": "Senior-level individual contributor",
+    "mid": "Mid-level",
+    "entry": "Entry-level / Recent graduate",
+}
+
+
+def _setup_scoring_preferences() -> None:
+    """Configure how jobs are scored — tailored to the user's profession."""
+    console.print(Panel(
+        "[bold]Step 4: Scoring Preferences[/bold]\n"
+        "Tell ApplyPilot about your profession so it scores jobs correctly.\n"
+        "A marketing professional and a software engineer need different criteria."
+    ))
+
+    console.print("\n[bold cyan]Profession Category[/bold cyan]")
+    cat_options = list(_PROFESSION_CATEGORIES.keys())
+    cat = Prompt.ask(
+        "What best describes your profession?",
+        choices=cat_options,
+        default="business",
+    )
+
+    industry = Prompt.ask("Industry (e.g. Marketing, Finance, Healthcare, Technology)", default="")
+
+    console.print("\n[bold cyan]Seniority Target[/bold cyan]")
+    console.print("[dim]What level of roles are you targeting?[/dim]")
+    sen_options = list(_SENIORITY_LEVELS.keys())
+    for k, v in _SENIORITY_LEVELS.items():
+        console.print(f"  [dim]{k}:[/dim] {v}")
+    seniority = Prompt.ask("Target seniority", choices=sen_options, default="senior_manager")
+
+    console.print("\n[bold cyan]Scoring Weights[/bold cyan]")
+    console.print("[dim]How important is each factor? (high / medium / low)[/dim]")
+    skills_w = Prompt.ask("Skills & expertise match", choices=["high", "medium", "low"], default="high")
+    exp_w = Prompt.ask("Years of experience", choices=["high", "medium", "low"], default="high")
+    seniority_w = Prompt.ask("Seniority level match", choices=["high", "medium", "low"], default="high")
+    industry_w = Prompt.ask("Industry/domain alignment", choices=["high", "medium", "low"], default="medium")
+    education_w = Prompt.ask("Education & certifications", choices=["high", "medium", "low"], default="medium")
+
+    console.print("\n[bold cyan]Title Filters[/bold cyan]")
+    console.print("[dim]Keywords that automatically disqualify a job (junior/entry roles below your level).[/dim]")
+    disqualify_raw = Prompt.ask(
+        "Disqualify if title contains (comma-separated)",
+        default="intern, internship, estagio, estagiario, trainee, junior, assistant, assistente, auxiliar, apprentice"
+    )
+    disqualify_keywords = [k.strip().lower() for k in disqualify_raw.split(",") if k.strip()]
+
+    target_raw = Prompt.ask(
+        "Target title keywords you're looking for (comma-separated, optional)",
+        default=""
+    )
+    target_keywords = [k.strip().lower() for k in target_raw.split(",") if k.strip()]
+
+    prefs = {
+        "industry": industry,
+        "profession_category": cat,
+        "seniority_target": seniority,
+        "weight_factors": {
+            "skills_match": skills_w,
+            "experience_years": exp_w,
+            "seniority_match": seniority_w,
+            "industry_match": industry_w,
+            "education": education_w,
+        },
+        "disqualify_title_keywords": disqualify_keywords,
+        "target_title_keywords": target_keywords,
+    }
+
+    if PROFILE_PATH.exists():
+        profile = json.loads(PROFILE_PATH.read_text(encoding="utf-8"))
+    else:
+        profile = {}
+
+    profile["scoring_preferences"] = prefs
+    PROFILE_PATH.write_text(json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8")
+    console.print(f"[green]Scoring preferences saved to {PROFILE_PATH}[/green]")
 
 
 # ---------------------------------------------------------------------------
@@ -352,11 +516,15 @@ def run_wizard() -> None:
     _setup_searches()
     console.print()
 
-    # Step 4: AI features (optional LLM)
+    # Step 4: Scoring preferences (profession-aware job scoring)
+    _setup_scoring_preferences()
+    console.print()
+
+    # Step 5: AI features (optional LLM)
     _setup_ai_features()
     console.print()
 
-    # Step 5: Auto-apply (Claude Code detection)
+    # Step 6: Auto-apply (Claude Code detection)
     _setup_auto_apply()
     console.print()
 

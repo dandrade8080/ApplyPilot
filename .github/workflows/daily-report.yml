@@ -40,10 +40,11 @@ jobs:
               "full_name": "Daniel Andrade",
               "email": "dandrade80@gmail.com",
               "phone": "(11) 95579-9633",
-              "city": "São Paulo",
+              "city": "Sao Paulo",
               "province_state": "SP",
               "country": "Brasil",
-              "linkedin_url": "https://www.linkedin.com/in/danielandrademkt"
+              "linkedin_url": "https://www.linkedin.com/in/danielandrademkt",
+              "industry": "Marketing"
             },
             "work_authorization": {
               "legally_authorized_to_work": "Yes",
@@ -62,8 +63,40 @@ jobs:
               "real_metrics": ["20 anos experiencia marketing", "LatAm region", "MBA Executivo"]
             },
             "skills_boundary": {
-              "tools": ["Portugues Nativo", "Ingles Fluente", "Italiano Fluente"],
-              "languages": []
+              "primary_skills": [
+                "Branding", "Marketing Digital", "Marketing Estrategico",
+                "Lideranca de Equipes", "Comunicacao Integrada",
+                "Inteligencia Artificial aplicada ao Marketing",
+                "Planejamento de Marketing", "Trade Marketing", "CRM", "E-commerce"
+              ],
+              "tools": ["Portugues Nativo", "Ingles Fluente", "Italiano Fluente"]
+            },
+            "scoring_preferences": {
+              "industry": "Marketing",
+              "profession_category": "business",
+              "seniority_target": "director_vp",
+              "primary_skills": [
+                "Branding", "Marketing Digital", "Marketing Estrategico",
+                "Lideranca de Equipes", "Comunicacao Integrada",
+                "CRM", "E-commerce", "Trade Marketing",
+                "Planejamento de Marketing", "Growth Marketing"
+              ],
+              "weight_factors": {
+                "skills_match": "high",
+                "experience_years": "high",
+                "seniority_match": "high",
+                "industry_match": "medium",
+                "education": "medium"
+              },
+              "disqualify_title_keywords": [
+                "intern", "internship", "estagio", "estagiario", "trainee",
+                "junior", "assistant", "assistente", "auxiliar", "apprentice"
+              ],
+              "target_title_keywords": [
+                "head de marketing", "marketing director", "vp marketing",
+                "chief marketing", "marketing manager", "diretor de marketing",
+                "gerente de marketing"
+              ]
             }
           }
           PROFILE

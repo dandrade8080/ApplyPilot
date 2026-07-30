@@ -6,7 +6,7 @@ import threading
 import time
 from pathlib import Path
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, jsonify, render_template, request, redirect, url_for, flash, send_from_directory
 
 from applypilot.config import (
     APP_DIR,
@@ -302,14 +302,50 @@ def pipeline():
     return render_template("pipeline.html", stats=stats, stages=stages)
 
 
-@bp.route("/config")
+@bp.route("/config", methods=["GET", "POST"])
 def config_view():
     """View and edit configuration."""
     load_env()
+
+    if request.method == "POST":
+        provider = request.form.get("provider", "")
+        api_key = request.form.get("api_key", "")
+        model = request.form.get("model", "")
+        llm_url = request.form.get("llm_url", "")
+        capsolver_key = request.form.get("capsolver_key", "")
+        telegram_token = request.form.get("telegram_bot_token", "")
+        telegram_chat = request.form.get("telegram_chat_id", "")
+
+        lines = ["# ApplyPilot configuration", ""]
+        if provider == "gemini":
+            lines.append(f"GEMINI_API_KEY={api_key}")
+            lines.append(f"LLM_MODEL={model or 'gemini-2.0-flash'}")
+        elif provider == "openai":
+            lines.append(f"OPENAI_API_KEY={api_key}")
+            lines.append(f"LLM_MODEL={model or 'gpt-4o-mini'}")
+        elif provider == "deepseek":
+            lines.append(f"DEEPSEEK_API_KEY={api_key}")
+            lines.append(f"LLM_MODEL={model or 'deepseek-chat'}")
+        elif provider == "local":
+            lines.append(f"LLM_URL={llm_url or 'http://localhost:8080/v1'}")
+            lines.append(f"LLM_MODEL={model or 'local-model'}")
+
+        if capsolver_key:
+            lines.append(f"CAPSOLVER_API_KEY={capsolver_key}")
+        if telegram_token:
+            lines.append(f"TELEGRAM_BOT_TOKEN={telegram_token}")
+        if telegram_chat:
+            lines.append(f"TELEGRAM_CHAT_ID={telegram_chat}")
+
+        lines.append("")
+        ENV_PATH.write_text("\n".join(lines), encoding="utf-8")
+        load_env()
+
     env_vars = {}
-    for key in ("GEMINI_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY", "LLM_URL", "LLM_MODEL", "CAPSOLVER_API_KEY"):
+    for key in ("GEMINI_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY", "LLM_URL", "LLM_MODEL", "CAPSOLVER_API_KEY",
+                "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
         val = os.environ.get(key, "")
-        env_vars[key] = val[:8] + "..." if val and len(val) > 10 else val
+        env_vars[key] = ("****" + val[-4:]) if val and len(val) > 8 else val
 
     config_data = {
         "app_dir": str(APP_DIR),
@@ -967,26 +1003,245 @@ def telegram_webhook():
 
 
 # ---------------------------------------------------------------------------
-# Knowledge base API
+# Setup wizard — web-based first-time configuration
 # ---------------------------------------------------------------------------
 
-@bp.route("/api/knowledge", methods=["GET"])
-def api_knowledge_list():
-    from applypilot.knowledge import get_all_knowledge
-    entries = get_all_knowledge(limit=100)
-    return jsonify([{
-        "id": e["id"],
-        "question": e["question"][:80],
-        "answer": e["answer"][:80],
-        "confidence": e.get("confidence", ""),
-        "source": e.get("source", ""),
-        "used_count": e.get("used_count", 0),
-        "updated_at": e.get("updated_at", ""),
-    } for e in entries])
+@bp.route("/setup")
+def setup_wizard():
+    """Web-based setup wizard page."""
+    profile = _read_profile()
+    searches = {}
+    env_vars = {}
+
+    try:
+        import yaml
+        from applypilot.config import SEARCH_CONFIG_PATH
+        if SEARCH_CONFIG_PATH.exists():
+            searches = yaml.safe_load(SEARCH_CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    except Exception:
+        pass
+
+    try:
+        from applypilot.config import ENV_PATH
+        if ENV_PATH.exists():
+            for line in ENV_PATH.read_text(encoding="utf-8").split("\n"):
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    env_vars[k.strip()] = v.strip()
+    except Exception:
+        pass
+
+    resume_exists = False
+    try:
+        from applypilot.config import RESUME_PATH
+        resume_exists = RESUME_PATH.exists()
+    except Exception:
+        pass
+
+    return render_template("setup.html", profile=profile, searches=searches,
+                         env_vars=env_vars, resume_exists=resume_exists)
 
 
-@bp.route("/api/knowledge/<int:kid>", methods=["DELETE"])
-def api_knowledge_delete(kid: int):
-    from applypilot.knowledge import delete_knowledge
-    ok = delete_knowledge(kid)
-    return jsonify({"ok": ok})
+@bp.route("/api/setup/profile", methods=["POST"])
+def api_setup_profile():
+    """Save profile data from the setup wizard."""
+    try:
+        data = request.get_json(force=True)
+        profile = _read_profile()
+
+        profile["personal"] = {
+            "full_name": data.get("full_name", ""),
+            "preferred_name": data.get("preferred_name", ""),
+            "email": data.get("email", ""),
+            "phone": data.get("phone", ""),
+            "city": data.get("city", ""),
+            "province_state": data.get("province_state", ""),
+            "country": data.get("country", ""),
+            "postal_code": data.get("postal_code", ""),
+            "linkedin_url": data.get("linkedin_url", ""),
+            "github_url": data.get("github_url", ""),
+            "portfolio_url": data.get("portfolio_url", ""),
+            "website_url": data.get("website_url", ""),
+            "industry": data.get("industry", ""),
+        }
+
+        profile["experience"] = {
+            "years_of_experience_total": str(data.get("years_of_experience", "")),
+            "education_level": data.get("education_level", ""),
+            "current_job_title": data.get("current_title", ""),
+            "target_role": data.get("target_role", ""),
+        }
+
+        profile["work_authorization"] = {
+            "legally_authorized_to_work": "Yes",
+            "require_sponsorship": "No",
+            "work_permit_type": "Citizen",
+        }
+
+        profile.setdefault("compensation", {})
+        profile.setdefault("availability", {"earliest_start_date": "Immediately"})
+        profile.setdefault("eeo_voluntary", {
+            "gender": "Decline to self-identify",
+            "race_ethnicity": "Decline to self-identify",
+            "veteran_status": "I am not a protected veteran",
+            "disability_status": "I do not wish to answer",
+        })
+        profile.setdefault("resume_facts", {"preserved_companies": [], "preserved_projects": [], "preserved_school": "", "real_metrics": []})
+
+        profile["skills_boundary"] = {
+            "primary_skills": [s.strip() for s in data.get("primary_skills", "").split(",") if s.strip()],
+            "tools": [s.strip() for s in data.get("tools", "").split(",") if s.strip()],
+            "certifications": [s.strip() for s in data.get("certifications", "").split(",") if s.strip()],
+            "soft_skills": [s.strip() for s in data.get("soft_skills", "").split(",") if s.strip()],
+        }
+
+        PROFILE_PATH.write_text(json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8")
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@bp.route("/api/setup/resume", methods=["POST"])
+def api_setup_resume():
+    """Save resume — accepts file upload or plain text."""
+    try:
+        from applypilot.config import RESUME_PATH
+
+        if "file" in request.files:
+            file = request.files["file"]
+            if file and file.filename:
+                suffix = Path(file.filename).suffix.lower()
+                content = file.read()
+                if suffix == ".pdf":
+                    pdf_path = RESUME_PATH.parent / "resume.pdf"
+                    pdf_path.write_bytes(content)
+                RESUME_PATH.write_bytes(content) if suffix == ".txt" else RESUME_PATH.write_text(
+                    content.decode("utf-8", errors="replace"), encoding="utf-8"
+                )
+                return jsonify({"ok": True})
+            return jsonify({"ok": False, "error": "No file provided"}), 400
+
+        data = request.get_json(force=True)
+        text = data.get("text", "")
+        if text.strip():
+            RESUME_PATH.write_text(text, encoding="utf-8")
+            return jsonify({"ok": True})
+        return jsonify({"ok": False, "error": "No resume text or file"}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@bp.route("/api/setup/searches", methods=["POST"])
+def api_setup_searches():
+    """Save search configuration from the setup wizard."""
+    try:
+        import yaml
+        from applypilot.config import SEARCH_CONFIG_PATH
+
+        data = request.get_json(force=True)
+
+        config = {
+            "defaults": {
+                "results_per_site": int(data.get("results_per_site", 50)),
+                "hours_old": int(data.get("hours_old", 72)),
+                "country_indeed": data.get("country_indeed", "brazil"),
+            },
+            "country": data.get("country_code", "BRA"),
+            "sites": data.get("sites", ["linkedin", "indeed"]),
+            "locations": [{"location": data.get("location", "Remote"), "remote": data.get("remote", True)}],
+            "queries": [],
+            "exclude_titles": [t.strip() for t in data.get("exclude_titles", "").split(",") if t.strip()],
+        }
+
+        locations_accept = [l.strip() for l in data.get("location_accept", "").split(",") if l.strip()]
+        if locations_accept:
+            config["location_accept"] = locations_accept
+
+        titles = [t.strip() for t in data.get("target_titles", "").split(",") if t.strip()]
+        for i, title in enumerate(titles):
+            config["queries"].append({"query": title, "tier": min(i + 1, 3)})
+
+        SEARCH_CONFIG_PATH.write_text(yaml.dump(config, allow_unicode=True, default_flow_style=False), encoding="utf-8")
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@bp.route("/api/setup/scoring", methods=["POST"])
+def api_setup_scoring():
+    """Save scoring preferences from the setup wizard."""
+    try:
+        data = request.get_json(force=True)
+        profile = _read_profile()
+
+        profile["scoring_preferences"] = {
+            "industry": data.get("industry", ""),
+            "profession_category": data.get("profession_category", "business"),
+            "seniority_target": data.get("seniority_target", "senior_manager"),
+            "primary_skills": [s.strip() for s in data.get("primary_skills", "").split(",") if s.strip()],
+            "weight_factors": {
+                "skills_match": data.get("weight_skills", "high"),
+                "experience_years": data.get("weight_experience", "high"),
+                "seniority_match": data.get("weight_seniority", "high"),
+                "industry_match": data.get("weight_industry", "medium"),
+                "education": data.get("weight_education", "medium"),
+            },
+            "disqualify_title_keywords": [
+                k.strip().lower() for k in data.get("disqualify_keywords", "").split(",") if k.strip()
+            ] or ["intern", "junior", "trainee", "assistant", "estagio"],
+            "target_title_keywords": [
+                k.strip().lower() for k in data.get("target_keywords", "").split(",") if k.strip()
+            ],
+        }
+
+        PROFILE_PATH.write_text(json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8")
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@bp.route("/api/setup/env", methods=["POST"])
+def api_setup_env():
+    """Save LLM configuration (API keys)."""
+    try:
+        from applypilot.config import ENV_PATH
+        data = request.get_json(force=True)
+
+        lines = ["# ApplyPilot configuration", ""]
+        provider = data.get("provider", "")
+
+        if provider == "gemini":
+            lines.append(f"GEMINI_API_KEY={data.get('api_key', '')}")
+            lines.append(f"LLM_MODEL={data.get('model', 'gemini-2.0-flash')}")
+        elif provider == "openai":
+            lines.append(f"OPENAI_API_KEY={data.get('api_key', '')}")
+            lines.append(f"LLM_MODEL={data.get('model', 'gpt-4o-mini')}")
+        elif provider == "deepseek":
+            lines.append(f"DEEPSEEK_API_KEY={data.get('api_key', '')}")
+            lines.append(f"LLM_MODEL={data.get('model', 'deepseek-chat')}")
+        elif provider == "local":
+            lines.append(f"LLM_URL={data.get('llm_url', 'http://localhost:8080/v1')}")
+            lines.append(f"LLM_MODEL={data.get('model', 'local-model')}")
+
+        if data.get("telegram_bot_token"):
+            lines.append(f"TELEGRAM_BOT_TOKEN={data.get('telegram_bot_token')}")
+        if data.get("telegram_chat_id"):
+            lines.append(f"TELEGRAM_CHAT_ID={data.get('telegram_chat_id')}")
+
+        lines.append("")
+        ENV_PATH.write_text("\n".join(lines), encoding="utf-8")
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+
+
+@bp.route("/api/setup/complete", methods=["POST"])
+def api_setup_complete():
+    """Mark setup as complete and reload env."""
+    load_env()
+    from applypilot.database import init_db
+    try:
+        init_db()
+    except Exception:
+        pass
+    return jsonify({"ok": True})

@@ -1,44 +1,20 @@
 """Job fit scoring: LLM-powered evaluation of candidate-job match quality.
 
 Scores jobs on a 1-10 scale by comparing the user's resume against each
-job description. All personal data is loaded at runtime from the user's
-profile and resume file.
+job description. The scoring prompt is dynamically generated from the
+user's profile and scoring preferences, adapting to any profession.
 """
 
-import json
 import logging
 import re
 import time
 from datetime import datetime, timezone
 
-from applypilot.config import RESUME_PATH, load_profile
+from applypilot.config import RESUME_PATH, load_scoring_preferences, build_scoring_prompt
 from applypilot.database import get_connection, get_jobs_by_stage
 from applypilot.llm import get_client
 
 log = logging.getLogger(__name__)
-
-
-# ── Scoring Prompt ────────────────────────────────────────────────────────
-
-SCORE_PROMPT = """You are a job fit evaluator. Given a candidate's resume and a job description, score how well the candidate fits the role.
-
-SCORING CRITERIA:
-- 9-10: Perfect match. Candidate has direct experience in nearly all required skills and qualifications.
-- 7-8: Strong match. Candidate has most required skills, minor gaps easily bridged.
-- 5-6: Moderate match. Candidate has some relevant skills but missing key requirements.
-- 3-4: Weak match. Significant skill gaps, would need substantial ramp-up.
-- 1-2: Poor match. Completely different field or experience level.
-
-IMPORTANT FACTORS:
-- Weight technical skills heavily (programming languages, frameworks, tools)
-- Consider transferable experience (automation, scripting, API work)
-- Factor in the candidate's project experience
-- Be realistic about experience level vs. job requirements (years of experience, seniority)
-
-RESPOND IN EXACTLY THIS FORMAT (no other text):
-SCORE: [1-10]
-KEYWORDS: [comma-separated ATS keywords from the job description that match or could match the candidate]
-REASONING: [2-3 sentences explaining the score]"""
 
 
 def _parse_score_response(response: str) -> dict:
@@ -70,25 +46,48 @@ def _parse_score_response(response: str) -> dict:
     return {"score": score, "keywords": keywords, "reasoning": reasoning}
 
 
-def score_job(resume_text: str, job: dict) -> dict:
+def _title_has_disqualifier(title: str, disqualify_keywords: list[str]) -> bool:
+    """Check if job title contains any disqualifying keywords (junior/entry roles)."""
+    if not title or not disqualify_keywords:
+        return False
+    title_lower = title.lower()
+    return any(kw.lower() in title_lower for kw in disqualify_keywords)
+
+
+def score_job(resume_text: str, job: dict, scoring_prompt: str | None = None,
+              disqualify_keywords: list[str] | None = None) -> dict:
     """Score a single job against the resume.
 
     Args:
         resume_text: The candidate's full resume text.
         job: Job dict with keys: title, site, location, full_description.
+        scoring_prompt: Pre-built scoring prompt. Generated dynamically if None.
+        disqualify_keywords: Title keywords that cap the score at 3.
 
     Returns:
         {"score": int, "keywords": str, "reasoning": str}
     """
+    title = job.get('title', '')
+
+    if disqualify_keywords and _title_has_disqualifier(title, disqualify_keywords):
+        return {
+            "score": 2,
+            "keywords": "",
+            "reasoning": f"Job title '{title}' indicates a junior/entry-level role below the candidate's target seniority. Auto-scored low."
+        }
+
+    if scoring_prompt is None:
+        scoring_prompt = build_scoring_prompt(resume_text)
+
     job_text = (
-        f"TITLE: {job['title']}\n"
+        f"TITLE: {title}\n"
         f"COMPANY: {job['site']}\n"
         f"LOCATION: {job.get('location', 'N/A')}\n\n"
         f"DESCRIPTION:\n{(job.get('full_description') or '')[:6000]}"
     )
 
     messages = [
-        {"role": "system", "content": SCORE_PROMPT},
+        {"role": "system", "content": scoring_prompt},
         {"role": "user", "content": f"RESUME:\n{resume_text}\n\n---\n\nJOB POSTING:\n{job_text}"},
     ]
 
@@ -112,6 +111,10 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
         {"scored": int, "errors": int, "elapsed": float, "distribution": list}
     """
     resume_text = RESUME_PATH.read_text(encoding="utf-8")
+    preferences = load_scoring_preferences()
+    scoring_prompt = build_scoring_prompt(resume_text, preferences)
+    disqualify_keywords = preferences.get("disqualify_title_keywords", [])
+
     conn = get_connection()
 
     if rescore:
@@ -126,7 +129,6 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
         log.info("No unscored jobs with descriptions found.")
         return {"scored": 0, "errors": 0, "elapsed": 0.0, "distribution": []}
 
-    # Convert sqlite3.Row to dicts if needed
     if jobs and not isinstance(jobs[0], dict):
         columns = jobs[0].keys()
         jobs = [dict(zip(columns, row)) for row in jobs]
@@ -138,7 +140,7 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
     results: list[dict] = []
 
     for job in jobs:
-        result = score_job(resume_text, job)
+        result = score_job(resume_text, job, scoring_prompt, disqualify_keywords)
         result["url"] = job["url"]
         completed += 1
 
@@ -164,7 +166,6 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
     elapsed = time.time() - t0
     log.info("Done: %d scored in %.1fs (%.1f jobs/sec)", len(results), elapsed, len(results) / elapsed if elapsed > 0 else 0)
 
-    # Score distribution
     dist = conn.execute("""
         SELECT fit_score, COUNT(*) FROM jobs
         WHERE fit_score IS NOT NULL
