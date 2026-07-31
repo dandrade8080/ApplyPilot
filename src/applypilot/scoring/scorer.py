@@ -20,6 +20,12 @@ log = logging.getLogger(__name__)
 def _parse_score_response(response: str) -> dict:
     """Parse the LLM's score response into structured data.
 
+    Handles various LLM response formats:
+    - Plain text with SCORE: / KEYWORDS: / REASONING: lines
+    - Markdown bold (**SCORE:**) from models like DeepSeek
+    - Extra whitespace and blank lines
+    - Different capitalizations (Score: vs SCORE:)
+
     Args:
         response: Raw LLM response text.
 
@@ -31,17 +37,40 @@ def _parse_score_response(response: str) -> dict:
     reasoning = response
 
     for line in response.split("\n"):
-        line = line.strip()
-        if line.startswith("SCORE:"):
+        clean = line.strip().lstrip("*").strip()
+
+        if not clean:
+            continue
+
+        score_match = re.match(r"(?i)score\s*:\s*(\d+)", clean)
+        if score_match:
             try:
-                score = int(re.search(r"\d+", line).group())
+                score = int(score_match.group(1))
                 score = max(1, min(10, score))
-            except (AttributeError, ValueError):
+            except (ValueError, IndexError):
                 score = 0
-        elif line.startswith("KEYWORDS:"):
-            keywords = line.replace("KEYWORDS:", "").strip()
-        elif line.startswith("REASONING:"):
-            reasoning = line.replace("REASONING:", "").strip()
+            continue
+
+        kw_match = re.match(r"(?i)keywords?\s*:\s*(.*)", clean)
+        if kw_match:
+            keywords = kw_match.group(1).strip()
+            continue
+
+        reason_match = re.match(r"(?i)reasoning\s*:\s*(.*)", clean)
+        if reason_match:
+            reasoning = reason_match.group(1).strip()
+            continue
+
+    # Fallback: try to find a number anywhere in the response
+    if score == 0:
+        numbers = re.findall(r"(?:score|nota|fit)[^\d]*(\d+)", response, re.IGNORECASE)
+        if numbers:
+            try:
+                score = max(1, min(10, int(numbers[0])))
+                keywords = "fallback_parse"
+                reasoning = "Score extracted via fallback parser: " + response[:200]
+            except ValueError:
+                pass
 
     return {"score": score, "keywords": keywords, "reasoning": reasoning}
 
@@ -94,7 +123,11 @@ def score_job(resume_text: str, job: dict, scoring_prompt: str | None = None,
     try:
         client = get_client()
         response = client.chat(messages, max_tokens=512, temperature=0.2)
-        return _parse_score_response(response)
+        result = _parse_score_response(response)
+        if result["score"] == 0:
+            log.warning("Score parse failed for '%s'. Raw response: %s",
+                       job.get("title", "?")[:60], response[:200])
+        return result
     except Exception as e:
         log.error("LLM error scoring job '%s': %s", job.get("title", "?"), e)
         return {"score": 0, "keywords": "", "reasoning": f"LLM error: {e}"}
