@@ -173,6 +173,9 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
     results: list[dict] = []
 
     for job in jobs:
+        if completed > 0:
+            time.sleep(4.0)  # stay within free tier limits (15 RPM = 4s between calls)
+
         result = score_job(resume_text, job, scoring_prompt, disqualify_keywords)
         result["url"] = job["url"]
         completed += 1
