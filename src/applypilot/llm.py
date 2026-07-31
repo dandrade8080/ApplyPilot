@@ -72,12 +72,10 @@ def _detect_provider() -> tuple[str, str, str]:
 # Client
 # ---------------------------------------------------------------------------
 
-_MAX_RETRIES = 5
+_MAX_RETRIES = 2
 _TIMEOUT = 120  # seconds
 
-# Base wait on first 429/503 (doubles each retry, caps at 60s).
-# Gemini free tier is 15 RPM = 4s minimum between requests; 10s gives headroom.
-_RATE_LIMIT_BASE_WAIT = 10
+_RATE_LIMIT_BASE_WAIT = 4
 
 
 _GEMINI_COMPAT_BASE = "https://generativelanguage.googleapis.com/v1beta/openai"
