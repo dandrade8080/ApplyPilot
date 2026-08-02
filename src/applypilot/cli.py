@@ -729,6 +729,29 @@ def daily_report(
     from applypilot.database import get_connection
     from applypilot.alerts import send_telegram_message
 
+    # Quick LLM health check: fail fast if the API key is out of quota.
+    from applypilot.llm import get_client
+    try:
+        client = get_client()
+        test_resp = client.chat([
+            {"role": "system", "content": "You are a brief assistant."},
+            {"role": "user", "content": "Say 'ok' and nothing else."},
+        ], max_tokens=10, temperature=0.0)
+        console.print(f"[dim]LLM health check: OK ({len(test_resp)} chars)[/dim]")
+    except Exception as e:
+        err_msg = str(e)
+        console.print(f"\n[red]LLM API error: {err_msg[:200]}[/red]")
+        console.print("[yellow]Check your API key, quota/billing, and LLM_MODEL in GitHub secrets.[/yellow]")
+        if not no_telegram:
+            send_telegram_message(
+                f"<b>ApplyPilot - Relatorio Diario</b>\n"
+                f"{datetime.now().strftime('%d/%m/%Y')}\n\n"
+                f"ERRO: API do LLM retornou erro:\n"
+                f"{err_msg[:200]}\n\n"
+                f"Verifique sua chave, quota e billing no Google Cloud Console.",
+            )
+        raise SystemExit(1)
+
     cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
 
     console.print(f"\n[bold blue]Daily Report[/bold blue] — buscando vagas das ultimas {hours}h")
@@ -740,26 +763,34 @@ def daily_report(
 
     console.print("\n[cyan]Stage 2/2: Scoring pending jobs...[/cyan]")
     score_result = run_scoring()
-    console.print(f"  Scored: {score_result['scored']} | Errors: {score_result['errors']} | Time: {score_result['elapsed']:.0f}s")
+    console.print(
+        f"  Scored: {score_result['scored']} | Errors: {score_result['errors']} | "
+        f"Time: {score_result['elapsed']:.0f}s"
+    )
+    console.print(
+        f"  Detalhe: {score_result.get('llm_calls', score_result['scored'])} chamadas LLM, "
+        f"{score_result.get('auto_skipped', 0)} puladas automaticamente pelo titulo"
+    )
 
     c = get_connection()
     rows = c.execute("""
         SELECT fit_score, title, site, location, url, full_description
         FROM jobs
-        WHERE fit_score >= 7 AND discovered_at >= ?
+        WHERE fit_score >= 6 AND discovered_at >= ?
         ORDER BY fit_score DESC, title
     """, (cutoff,)).fetchall()
 
     total_with_score = len(rows)
 
     if total_with_score == 0:
-        console.print("\n[yellow]Nenhuma vaga com score >= 7 encontrada neste periodo.[/yellow]")
+        console.print("\n[yellow]Nenhuma vaga com score >= 6 encontrada neste periodo.[/yellow]")
         if not no_telegram:
             send_telegram_message(
                 f"<b>ApplyPilot - Relatorio Diario</b>\n"
                 f"{datetime.now().strftime('%d/%m/%Y')}\n\n"
-                f"Nenhuma vaga com score >= 7 nas ultimas {hours}h.\n"
-                f"Total de vagas novas: {result['new']} | Pontuadas: {score_result['scored']}",
+                f"Nenhuma vaga com score >= 6 nas ultimas {hours}h.\n"
+                f"Vagas novas: {result['new']} | Pontuadas: {score_result['scored']} | "
+                f"Erros: {score_result['errors']} | LLM calls: {score_result.get('llm_calls', score_result['scored'])}",
             )
         return
 
@@ -770,7 +801,7 @@ def daily_report(
         f"<b>ApplyPilot - Relatorio Diario</b>",
         f"<b>{date_str}</b>",
         f"",
-        f"Vagas com score >= 7 encontradas: <b>{total_with_score}</b>",
+        f"Vagas com score >= 6 encontradas: <b>{total_with_score}</b>",
         f"(Mostrando as {len(top_rows)} melhores)",
         f"",
     ]
@@ -790,7 +821,11 @@ def daily_report(
     if total_with_score > top:
         tg_lines.append(f"... e mais {total_with_score - top} vaga(s).")
 
-    tg_lines.append(f"\nNovas: {result['new']} | Pontuadas: {score_result['scored']} | Total DB: {c.execute('SELECT count(*) FROM jobs').fetchone()[0]}")
+    tg_lines.append(
+        f"\nNovas: {result['new']} | Pontuadas: {score_result['scored']} | "
+        f"Erros: {score_result['errors']} | LLM calls: {score_result.get('llm_calls', score_result['scored'])} | "
+        f"Total DB: {c.execute('SELECT count(*) FROM jobs').fetchone()[0]}"
+    )
 
     tg_message = "\n".join(tg_lines)
 
@@ -798,7 +833,7 @@ def daily_report(
     md_lines = [
         f"# ApplyPilot - Relatorio Diario - {date_str}",
         "",
-        f"Vagas com score >= 7: **{total_with_score}**",
+        f"Vagas com score >= 6: **{total_with_score}**",
         f"Vagas novas descobertas: {result['new']}",
         f"Vagas pontuadas: {score_result['scored']}",
         f"Periodo: ultimas {hours}h",
@@ -823,7 +858,7 @@ def daily_report(
         console.print(f"\n[dim]Telegram skipado (--no-telegram).[/dim]")
 
     console.print(f"[dim]Relatorio local salvo: {report_path}[/dim]")
-    console.print(f"[bold]Vagas score >= 7 encontradas: {total_with_score}[/bold]\n")
+    console.print(f"[bold]Vagas score >= 6 encontradas: {total_with_score}[/bold]\n")
 
 
 if __name__ == "__main__":

@@ -83,8 +83,20 @@ def _title_has_disqualifier(title: str, disqualify_keywords: list[str]) -> bool:
     return any(kw.lower() in title_lower for kw in disqualify_keywords)
 
 
+def _title_has_relevant_keyword(title: str, keywords: list[str]) -> bool:
+    """Check if job title contains any relevant target keywords.
+
+    Returns True if no keywords are configured (score everything).
+    """
+    if not title or not keywords:
+        return True
+    title_lower = title.lower()
+    return any(kw.lower() in title_lower for kw in keywords)
+
+
 def score_job(resume_text: str, job: dict, scoring_prompt: str | None = None,
-              disqualify_keywords: list[str] | None = None) -> dict:
+              disqualify_keywords: list[str] | None = None,
+              target_keywords: list[str] | None = None) -> dict:
     """Score a single job against the resume.
 
     Args:
@@ -92,6 +104,8 @@ def score_job(resume_text: str, job: dict, scoring_prompt: str | None = None,
         job: Job dict with keys: title, site, location, full_description.
         scoring_prompt: Pre-built scoring prompt. Generated dynamically if None.
         disqualify_keywords: Title keywords that cap the score at 3.
+        target_keywords: Title keywords that indicate a relevant role. Jobs without
+            any of these are auto-scored low to save LLM quota.
 
     Returns:
         {"score": int, "keywords": str, "reasoning": str}
@@ -103,6 +117,13 @@ def score_job(resume_text: str, job: dict, scoring_prompt: str | None = None,
             "score": 2,
             "keywords": "",
             "reasoning": f"Job title '{title}' indicates a junior/entry-level role below the candidate's target seniority. Auto-scored low."
+        }
+
+    if target_keywords and not _title_has_relevant_keyword(title, target_keywords):
+        return {
+            "score": 3,
+            "keywords": "",
+            "reasoning": f"Job title '{title}' does not match target keywords {target_keywords}. Auto-scored low to conserve LLM quota."
         }
 
     if scoring_prompt is None:
@@ -147,6 +168,7 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
     preferences = load_scoring_preferences()
     scoring_prompt = build_scoring_prompt(resume_text, preferences)
     disqualify_keywords = preferences.get("disqualify_title_keywords", [])
+    target_keywords = preferences.get("target_title_keywords", [])
 
     conn = get_connection()
 
@@ -170,13 +192,19 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
     t0 = time.time()
     completed = 0
     errors = 0
+    llm_calls = 0
+    auto_skipped = 0
     results: list[dict] = []
 
     for job in jobs:
         if completed > 0:
             time.sleep(4.0)  # stay within free tier limits (15 RPM = 4s between calls)
 
-        result = score_job(resume_text, job, scoring_prompt, disqualify_keywords)
+        result = score_job(resume_text, job, scoring_prompt, disqualify_keywords, target_keywords)
+        if result.get("reasoning", "").startswith("Job title"):
+            auto_skipped += 1
+        else:
+            llm_calls += 1
         result["url"] = job["url"]
         completed += 1
 
@@ -200,7 +228,11 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
     conn.commit()
 
     elapsed = time.time() - t0
-    log.info("Done: %d scored in %.1fs (%.1f jobs/sec)", len(results), elapsed, len(results) / elapsed if elapsed > 0 else 0)
+    log.info(
+        "Done: %d scored in %.1fs (%.1f jobs/sec) — %d LLM calls, %d auto-skipped by title filter",
+        len(results), elapsed, len(results) / elapsed if elapsed > 0 else 0,
+        llm_calls, auto_skipped,
+    )
 
     dist = conn.execute("""
         SELECT fit_score, COUNT(*) FROM jobs
@@ -214,4 +246,6 @@ def run_scoring(limit: int = 0, rescore: bool = False) -> dict:
         "errors": errors,
         "elapsed": elapsed,
         "distribution": distribution,
+        "llm_calls": llm_calls,
+        "auto_skipped": auto_skipped,
     }
