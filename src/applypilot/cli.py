@@ -731,6 +731,7 @@ def daily_report(
 
     # Quick LLM health check: fail fast if the API key is out of quota.
     from applypilot.llm import get_client
+    llm_available = False
     try:
         client = get_client()
         test_resp = client.chat([
@@ -738,19 +739,11 @@ def daily_report(
             {"role": "user", "content": "Say 'ok' and nothing else."},
         ], max_tokens=10, temperature=0.0)
         console.print(f"[dim]LLM health check: OK ({len(test_resp)} chars)[/dim]")
+        llm_available = True
     except Exception as e:
         err_msg = str(e)
-        console.print(f"\n[red]LLM API error: {err_msg[:200]}[/red]")
-        console.print("[yellow]Check your API key, quota/billing, and LLM_MODEL in GitHub secrets.[/yellow]")
-        if not no_telegram:
-            send_telegram_message(
-                f"<b>ApplyPilot - Relatorio Diario</b>\n"
-                f"{datetime.now().strftime('%d/%m/%Y')}\n\n"
-                f"ERRO: API do LLM retornou erro:\n"
-                f"{err_msg[:200]}\n\n"
-                f"Verifique sua chave, quota e billing no Google Cloud Console.",
-            )
-        raise SystemExit(1)
+        console.print(f"\n[red]LLM API indisponivel: {err_msg[:200]}[/red]")
+        console.print("[yellow]Modo offline: filtrando apenas por titulo relevante.[/yellow]")
 
     cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
 
@@ -761,16 +754,50 @@ def daily_report(
     result = run_discovery(cfg=cfg)
     console.print(f"  New: {result['new']} | Dupes: {result['existing']} | Errors: {result['errors']}")
 
-    console.print("\n[cyan]Stage 2/2: Scoring pending jobs...[/cyan]")
-    score_result = run_scoring()
-    console.print(
-        f"  Scored: {score_result['scored']} | Errors: {score_result['errors']} | "
-        f"Time: {score_result['elapsed']:.0f}s"
-    )
-    console.print(
-        f"  Detalhe: {score_result.get('llm_calls', score_result['scored'])} chamadas LLM, "
-        f"{score_result.get('auto_skipped', 0)} puladas automaticamente pelo titulo"
-    )
+    if llm_available:
+        console.print("\n[cyan]Stage 2/2: Scoring pending jobs...[/cyan]")
+        score_result = run_scoring()
+        console.print(
+            f"  Scored: {score_result['scored']} | Errors: {score_result['errors']} | "
+            f"Time: {score_result['elapsed']:.0f}s"
+        )
+        console.print(
+            f"  Detalhe: {score_result.get('llm_calls', score_result['scored'])} chamadas LLM, "
+            f"{score_result.get('auto_skipped', 0)} puladas automaticamente pelo titulo"
+        )
+    else:
+        # Offline mode: assign scores based on title relevance only
+        from applypilot.scoring.scorer import _title_has_relevant_keyword
+        from applypilot.config import load_scoring_preferences
+        score_result = {"scored": 0, "errors": 0, "elapsed": 0, "distribution": [], "llm_calls": 0, "auto_skipped": 0}
+        prefs = load_scoring_preferences()
+        target_kw = prefs.get("target_title_keywords", [])
+        disqualify_kw = prefs.get("disqualify_title_keywords", [])
+        from applypilot.scoring.scorer import _title_has_disqualifier
+
+        c = get_connection()
+        jobs = c.execute(
+            "SELECT url, title, fit_score FROM jobs WHERE full_description IS NOT NULL AND fit_score IS NULL"
+        ).fetchall()
+        now = datetime.now(timezone.utc).isoformat()
+        scored = 0
+        for row in jobs:
+            title = row["title"] or ""
+            if _title_has_disqualifier(title, disqualify_kw):
+                s = 2
+            elif target_kw and _title_has_relevant_keyword(title, target_kw):
+                s = 7
+            else:
+                s = 3
+            c.execute(
+                "UPDATE jobs SET fit_score = ?, score_reasoning = ?, scored_at = ? WHERE url = ?",
+                (s, f"Offline mode: title-based score (LLM unavailable). Title: {title}", now, row["url"]),
+            )
+            scored += 1
+        c.commit()
+        score_result["scored"] = scored
+        console.print(f"\n[cyan]Stage 2/2: Offline scoring (title-only)...[/cyan]")
+        console.print(f"  Scored: {scored} | Mode: titulo {len(target_kw)} keywords | Disqualify: {len(disqualify_kw)} keywords")
 
     c = get_connection()
     rows = c.execute("""
@@ -784,13 +811,14 @@ def daily_report(
 
     if total_with_score == 0:
         console.print("\n[yellow]Nenhuma vaga com score >= 6 encontrada neste periodo.[/yellow]")
+        mode_note = " (modo offline - LLM indisponivel)" if not llm_available else ""
         if not no_telegram:
             send_telegram_message(
-                f"<b>ApplyPilot - Relatorio Diario</b>\n"
+                f"<b>ApplyPilot - Relatorio Diario</b>{mode_note}\n"
                 f"{datetime.now().strftime('%d/%m/%Y')}\n\n"
                 f"Nenhuma vaga com score >= 6 nas ultimas {hours}h.\n"
                 f"Vagas novas: {result['new']} | Pontuadas: {score_result['scored']} | "
-                f"Erros: {score_result['errors']} | LLM calls: {score_result.get('llm_calls', score_result['scored'])}",
+                f"Erros: {score_result['errors']}",
             )
         return
 
