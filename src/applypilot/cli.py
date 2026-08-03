@@ -767,6 +767,7 @@ def daily_report(
         )
     else:
         # Offline mode: assign scores based on title relevance only
+        from datetime import timezone
         from applypilot.scoring.scorer import _title_has_relevant_keyword
         from applypilot.config import load_scoring_preferences
         score_result = {"scored": 0, "errors": 0, "elapsed": 0, "distribution": [], "llm_calls": 0, "auto_skipped": 0}
