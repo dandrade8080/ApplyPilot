@@ -89,24 +89,24 @@ def _load_location_config(search_cfg: dict) -> tuple[list[str], list[str]]:
 def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> bool:
     """Check if a job location passes the user's location filter.
 
-    Remote jobs are always accepted. Non-remote jobs must match an accept
-    pattern and not match a reject pattern.
+    Rejects non-local countries first (even if remote), then accepts
+    remote positions or explicit location matches.
     """
     if not location:
         return True  # unknown location -- keep it, let scorer decide
 
     loc = location.lower()
 
-    # Remote jobs always OK
-    if any(r in loc for r in ("remote", "anywhere", "work from home", "wfh", "distributed")):
-        return True
-
-    # Reject non-remote matches
+    # Reject unwanted countries/regions FIRST (even remote ones)
     for r in reject:
         if r.lower() in loc:
             return False
 
-    # Accept matches
+    # Remote jobs are OK (only reach here if they passed country rejection)
+    if any(r in loc for r in ("remote", "anywhere", "work from home", "wfh", "distributed")):
+        return True
+
+    # Accept explicit location matches
     for a in accept:
         if a.lower() in loc:
             return True
@@ -450,17 +450,67 @@ def _full_crawl(
     }
 
 
+# -- Filter presets -----------------------------------------------------------
+def apply_filter_preset(
+    cfg: dict,
+    preset_name: str | None = None,
+    overrides: dict | None = None,
+) -> dict:
+    """Apply a named filter preset and/or CLI overrides to the search config.
+
+    This keeps preset definitions centralized in searches.yaml and also
+    supports one-off command-line overrides for quick experimentation.
+
+    Args:
+        cfg: Base search configuration dict (from searches.yaml).
+        preset_name: Name of a preset block in ``search_presets``.
+        overrides: Flat dict of search config keys to override.
+
+    Returns:
+        Merged search configuration dict.
+    """
+    merged = dict(cfg)
+
+    if preset_name:
+        presets = cfg.get("search_presets", {})
+        if preset_name not in presets:
+            log.warning("Unknown filter preset: %s", preset_name)
+        else:
+            preset = presets[preset_name]
+            # Deep merge simple keys into the top-level config
+            for key, value in preset.items():
+                if isinstance(value, list) and key in merged and isinstance(merged[key], list):
+                    # Use override list if provided, else replace default list
+                    merged[key] = list(value)
+                else:
+                    merged[key] = value
+
+    if overrides:
+        for key, value in overrides.items():
+            if value is None:
+                continue
+            if isinstance(value, list):
+                merged[key] = list(value)
+            else:
+                merged[key] = value
+
+    return merged
+
+
 # -- Public entry point ------------------------------------------------------
 
-def run_discovery(cfg: dict | None = None) -> dict:
+def run_discovery(cfg: dict | None = None, filter_preset: str | None = None, filter_overrides: dict | None = None) -> dict:
     """Main entry point for JobSpy-based job discovery.
 
     Loads search queries and locations from the user's search config YAML,
-    then runs a full crawl across all configured job boards.
+    applies any named filter preset and overrides, then runs a full crawl
+    across all configured job boards.
 
     Args:
-        cfg: Override the search configuration dict. If None, loads from
+        cfg: The search configuration dict. If None, loads from
              the user's searches.yaml file.
+        filter_preset: Optional named preset from ``search_presets``.
+        filter_overrides: Optional dict of config keys to override.
 
     Returns:
         Dict with stats: new, existing, errors, db_total, queries.
@@ -471,6 +521,8 @@ def run_discovery(cfg: dict | None = None) -> dict:
     if not cfg:
         log.warning("No search configuration found. Run `applypilot init` to create one.")
         return {"new": 0, "existing": 0, "errors": 0, "db_total": 0, "queries": 0}
+
+    cfg = apply_filter_preset(cfg, preset_name=filter_preset, overrides=filter_overrides)
 
     proxy = cfg.get("proxy")
     sites = cfg.get("sites")
