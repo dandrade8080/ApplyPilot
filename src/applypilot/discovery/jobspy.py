@@ -89,11 +89,12 @@ def _load_location_config(search_cfg: dict) -> tuple[list[str], list[str]]:
 def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> bool:
     """Check if a job location passes the user's location filter.
 
-    Rejects non-local countries first (even if remote), then accepts
-    remote positions or explicit location matches.
+    Only accepts jobs whose location explicitly matches an accepted
+    Brazilian region (São Paulo, SP, Brasil, etc.). Remote-only jobs
+    without a matching accepted location are rejected.
     """
     if not location:
-        return True  # unknown location -- keep it, let scorer decide
+        return True
 
     loc = location.lower()
 
@@ -102,16 +103,12 @@ def _location_ok(location: str | None, accept: list[str], reject: list[str]) -> 
         if r.lower() in loc:
             return False
 
-    # Remote jobs are OK (only reach here if they passed country rejection)
-    if any(r in loc for r in ("remote", "anywhere", "work from home", "wfh", "distributed")):
-        return True
-
-    # Accept explicit location matches
+    # Accept ONLY if location mentions a known accepted region
     for a in accept:
         if a.lower() in loc:
             return True
 
-    # No match -- reject unknown
+    # No match -- reject unknown (including purely remote jobs outside SP)
     return False
 
 
